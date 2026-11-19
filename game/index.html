@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Neon Hustle — Lumen Bay</title>
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <div id="stage">
+    <canvas id="game" width="1280" height="720"></canvas>
+    <div class="scanlines" aria-hidden="true"></div>
+
+    <div id="hud" class="hud hidden">
+      <div class="hud-top">
+        <div class="panel stat-panel">
+          <div class="stat-row"><span class="stat-label">HEALTH</span><span id="healthText" class="stat-value">100</span></div>
+          <div class="bar"><div id="healthBar" class="bar-fill health"></div></div>
+          <div class="stat-row wanted-row"><span class="stat-label">WANTED</span><span id="wantedText" class="wanted-stars">&#9734;&#9734;&#9734;&#9734;&#9734;</span></div>
+        </div>
+        <div class="panel money-panel">
+          <div class="stat-label">CASH ON HAND</div>
+          <div id="moneyText" class="money-value">$0</div>
+          <div id="districtText" class="district-label">GLASS QUARTER</div>
+        </div>
+      </div>
+
+      <div id="missionPanel" class="panel mission-panel">
+        <div class="stat-label">ACTIVE CONTRACT</div>
+        <div id="missionTitle" class="mission-title">CASH RUN</div>
+        <div id="missionDesc" class="mission-desc">Collect 5 bundles of marked cash</div>
+        <div class="mission-track"><div id="missionBar" class="mission-fill"></div></div>
+        <div id="missionCount" class="mission-count">0 / 5</div>
+      </div>
+
+      <div class="panel map-panel">
+        <div class="stat-label">LUMEN BAY</div>
+        <canvas id="minimap" width="180" height="180"></canvas>
+        <div class="map-legend"><span class="dot you"></span>YOU <span class="dot cop"></span>COPS <span class="dot job"></span>JOB</div>
+      </div>
+
+      <div class="control-hint">WASD DRIVE / MOVE &nbsp;·&nbsp; MOUSE AIM &nbsp;·&nbsp; CLICK FIRE &nbsp;·&nbsp; E ENTER / EXIT CAR &nbsp;·&nbsp; R RESTART</div>
+      <div id="toast" class="toast"></div>
+    </div>
+
+    <div id="startScreen" class="screen">
+      <div class="screen-inner">
+        <div class="eyebrow">LUMEN BAY &nbsp;/&nbsp; OPEN WORLD CRIME</div>
+        <h1 class="title">NEON <span>HUSTLE</span></h1>
+        <p class="tagline">Own the night. Steal the ride. Lose the heat.</p>
+        <button id="startBtn" class="cta" type="button">PRESS ENTER TO START</button>
+        <div class="controls-grid">
+          <div><b>W A S D</b><span>Drive / run</span></div>
+          <div><b>MOUSE</b><span>Aim &amp; fire</span></div>
+          <div><b>E</b><span>Steal / exit car</span></div>
+          <div><b>SPACE</b><span>Handbrake</span></div>
+          <div><b>R</b><span>Restart run</span></div>
+          <div><b>ESC</b><span>Pause</span></div>
+        </div>
+        <div class="screen-foot">THREE CONTRACTS &nbsp;·&nbsp; FIVE WANTED STARS &nbsp;·&nbsp; ONE CITY</div>
+      </div>
+    </div>
+
+    <div id="endScreen" class="screen hidden">
+      <div class="screen-inner end-inner">
+        <div id="endKicker" class="eyebrow">RUN COMPLETE</div>
+        <h2 id="endTitle" class="end-title">CITY CLEARED</h2>
+        <p id="endSubtitle" class="tagline">Every contract closed. Lumen Bay remembers your name.</p>
+        <div class="results">
+          <div><span class="stat-label">CASH EARNED</span><b id="statCash">$0</b></div>
+          <div><span class="stat-label">CONTRACTS</span><b id="statMissions">0 / 3</b></div>
+          <div><span class="stat-label">TOP WANTED</span><b id="statWanted">0 STARS</b></div>
+          <div><span class="stat-label">CRUISERS DOWN</span><b id="statKills">0</b></div>
+        </div>
+        <button id="restartBtn" class="cta" type="button">PRESS R TO RUN IT AGAIN</button>
+        <div class="screen-foot">PROGRESS SAVED LOCALLY &nbsp;·&nbsp; NEON HUSTLE</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
