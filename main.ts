@@ -1,59 +1,57 @@
-// Neon Hustle authored entrypoint round 3.
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+// Neon Hustle final authored entrypoint.
+import fs from "node:fs";
+import path from "node:path";
 
-const projectRoot = path.dirname(fileURLToPath(import.meta.url));
+// Where the deliverable bundle is assembled; overridable by the harness.
+const DELIVERY_ROOT = process.env.MAKEFUN_OUTPUT_DIR || "/output";
 
-// Delivery folders are created on demand so the build works on a clean checkout.
-function makeFolder(folder) {
-  fs.mkdirSync(folder, { recursive: true });
+// Create a directory only when absent so repeated runs stay safe.
+function makeSureDir(folder) {
+  if (!fs.existsSync(folder)) {
+    fs.mkdirSync(folder, { recursive: true });
+  }
 }
 
-// Mirror a whole directory tree while skipping anything that is not a regular file.
-function mirrorTree(source, destination) {
+// Mirror one source tree into the delivery tree, file by file.
+function duplicateTree(source, destination) {
+  makeSureDir(destination);
   if (!fs.existsSync(source)) {
-    return 0;
+    return;
   }
-  makeFolder(destination);
-  let mirrored = 0;
-  for (const item of fs.readdirSync(source, { withFileTypes: true })) {
-    const fromItem = path.join(source, item.name);
-    const toItem = path.join(destination, item.name);
+  const items = fs.readdirSync(source, { withFileTypes: true });
+  for (const item of items) {
+    const src = path.join(source, item.name);
+    const dst = path.join(destination, item.name);
     if (item.isDirectory()) {
-      mirrored += mirrorTree(fromItem, toItem);
+      duplicateTree(src, dst);
     } else if (item.isFile()) {
-      fs.copyFileSync(fromItem, toItem);
-      mirrored += 1;
+      fs.copyFileSync(src, dst);
     }
   }
-  return mirrored;
 }
 
-async function runBuild() {
-  const deliveryDir = process.env.MAKEFUN_OUTPUT_DIR || '/output';
-  makeFolder(deliveryDir);
+// Lay out the folders that the dossier builder will inspect.
+function assembleDelivery() {
+  const here = process.cwd();
+  const out = path.resolve(DELIVERY_ROOT);
+  makeSureDir(out);
+  duplicateTree(path.join(here, "game"), path.join(out, "game"));
+  duplicateTree(path.join(here, "screenshots"), path.join(out, "screenshots"));
+  return out;
+}
 
-  // The browser bundle stays completely self contained and offline.
-  const bundleCount = mirrorTree(path.join(projectRoot, 'game'), path.join(deliveryDir, 'game'));
-  const shotCount = mirrorTree(path.join(projectRoot, 'screenshots'), path.join(deliveryDir, 'screenshots'));
-
-  const { buildDossier } = await import('./vendor/makefun-game.ts');
-
-  // Budget caps keep the assembled dossier inside the make.fun submission limits.
-  const dossier = await buildDossier(deliveryDir, {
+async function main() {
+  const deliveryDir = assembleDelivery();
+  const vendor = await import("./vendor/makefun-game.ts");
+  const buildDossier = vendor.buildDossier;
+  const dossierResult = buildDossier(deliveryDir, {
     text_max_bytes: 163840,
     screenshots: { max: 4, max_bytes: 262144 },
     game_max_files: 993,
     game_max_bytes: 50331648,
-    game_path_max_bytes: 1000,
+    game_path_max_bytes: 1000
   });
-
-  fs.writeFileSync(path.join(deliveryDir, 'dossier.json'), dossier, 'utf8');
-  process.stdout.write(`Neon Hustle packaged ${bundleCount} game files and ${shotCount} screenshots into ${deliveryDir}\n`);
+  fs.writeFileSync(path.join(deliveryDir, "dossier.json"), dossierResult);
 }
 
-runBuild().catch((failure) => {
-  process.stderr.write(`${failure && failure.stack ? failure.stack : String(failure)}\n`);
-  process.exitCode = 1;
-});
+main();
