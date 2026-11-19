@@ -1,160 +1,189 @@
-import { WORLD, clamp, wrapAngle, pointInBuilding, createCar } from './world.js';
+import { BLOCK, ROAD, clamp, resolveBuildings, clampEntity } from './world.js';
+import { fireShot, burst } from './shots.js';
 
-export function createPlayer(world, rng) {
-  const car = createCar(rng, world.spawn.x, world.spawn.y, world.spawn.angle, false);
-  car.color = '#ff2f6d';
-  car.maxSpeed = 2.1;
-  car.stolen = false;
+const TOP_SPEED = 235;
+
+export function createPlayer(world) {
   return {
-    x: world.spawn.x,
-    y: world.spawn.y,
-    angle: world.spawn.angle,
-    speed: 0,
-    car,
-    inCar: true,
+    x: 2 * BLOCK + ROAD * 0.24,
+    y: 4 * BLOCK - ROAD * 0.24,
+    angle: 0,
     health: 100,
-    maxHealth: 100,
-    money: 0,
+    cash: 0,
     wanted: 0,
-    cooldown: 0,
     ammo: 14,
-    shotsFired: 0,
-    hitFlash: 0,
-    walkPhase: 0,
-    color: '#22e0ff',
+    reserve: 84,
+    magSize: 14,
+    inCar: false,
+    car: null,
+    shootCooldown: 0,
+    reloadTime: 0,
+    hurt: 0,
+    muzzle: 0,
+    driveDistance: 0,
+    evadedCount: 0,
+    alive: true,
   };
 }
 
-export function damagePlayer(player, amount, game) {
-  if (player.health <= 0) return;
-  player.health = Math.max(0, player.health - amount);
-  player.hitFlash = 10;
-  if (player.health <= 0) {
-    game.endReason = 'busted';
-    game.mode = 'end';
-    game.toast('BUSTED');
-  }
+function fire(player, game, angle) {
+  player.shootCooldown = 0.14;
+  player.ammo -= 1;
+  player.muzzle = 0.07;
+  const aim = angle + (game.rng() - 0.5) * 0.045;
+  const originX = player.x + Math.cos(aim) * 18;
+  const originY = player.y + Math.sin(aim) * 18;
+  fireShot(game.shots, originX, originY, aim, 'player', 760, 26, '#ffe45c', game.rng);
+  burst(game.shots, originX, originY, '#ff9f43', 3, game.rng);
+  game.shake = Math.min(12, game.shake + 1.8);
 }
 
-export function tryEnterVehicle(player, game) {
-  if (player.inCar) {
+export function beginReload(player, game) {
+  if (player.ammo >= player.magSize || player.reserve <= 0 || player.reloadTime > 0) return;
+  const needed = player.magSize - player.ammo;
+  const loaded = Math.min(needed, player.reserve);
+  player.reserve -= loaded;
+  player.ammo += loaded;
+  player.reloadTime = 0.85;
+  game.toast('RELOADING');
+}
+
+export function toggleVehicle(player, world, game) {
+  if (player.inCar && player.car) {
     const car = player.car;
-    car.speed = 0;
-    car.parked = true;
-    game.world.parked.push(car);
-    player.x = clamp(car.x + Math.cos(car.angle + Math.PI / 2) * 34, 10, WORLD - 10);
-    player.y = clamp(car.y + Math.sin(car.angle + Math.PI / 2) * 34, 10, WORLD - 10);
-    player.angle = car.angle;
+    const exitSide = car.heading + Math.PI / 2;
+    player.x = car.x + Math.cos(exitSide) * 30;
+    player.y = car.y + Math.sin(exitSide) * 30;
+    resolveBuildings(player, world, 11);
+    clampEntity(player, 11);
+    car.controlled = false;
     player.inCar = false;
     player.car = null;
-    game.toast('ON FOOT');
+    game.toast('LEFT THE VEHICLE');
     return;
   }
-  let best = null;
-  let bestD = 58;
-  const list = game.world.parked;
-  for (let i = 0; i < list.length; i++) {
-    const c = list[i];
-    const d = Math.hypot(c.x - player.x, c.y - player.y);
-    if (d < bestD) { bestD = d; best = c; }
-  }
-  if (!best) {
-    game.toast('NO VEHICLE NEARBY');
-    return;
-  }
-  const idx = list.indexOf(best);
-  if (idx >= 0) list.splice(idx, 1);
-  best.parked = false;
-  best.stolen = true;
-  best.speed = 0;
-  player.inCar = true;
-  player.car = best;
-  player.x = best.x;
-  player.y = best.y;
-  player.angle = best.angle;
-  player.speed = 0;
-  game.addWanted(1);
-  game.toast('CAR JACKED');
-}
 
-function collide(player, nx, ny, game) {
-  if (nx < 10 || ny < 10 || nx > WORLD - 10 || ny > WORLD - 10) return true;
-  const b = pointInBuilding(game.world, nx, ny);
-  if (b) return true;
-  const parked = game.world.parked;
-  for (let i = 0; i < parked.length; i++) {
-    const c = parked[i];
-    if (Math.hypot(c.x - nx, c.y - ny) < 22) {
-      c.hp -= 1;
-      damagePlayer(player, 3, game);
-      game.addWanted(1);
-      game.combat.burst(c.x, c.y, '#ffd23f', 7);
-      return true;
+  let closest = null;
+  let closestDistance = 58;
+  for (let index = 0; index < world.traffic.length; index += 1) {
+    const car = world.traffic[index];
+    if (car.controlled || car.police) continue;
+    const distance = Math.hypot(car.x - player.x, car.y - player.y);
+    if (distance < closestDistance) {
+      closest = car;
+      closestDistance = distance;
     }
   }
-  return false;
+
+  if (!closest) {
+    game.toast('NO CAR IN RANGE');
+    return;
+  }
+
+  closest.controlled = true;
+  player.inCar = true;
+  player.car = closest;
+  player.x = closest.x;
+  player.y = closest.y;
+  player.angle = closest.heading;
+
+  if (!closest.stolen) {
+    closest.stolen = true;
+    player.wanted = Math.min(5, player.wanted + 1);
+    game.toast('CARJACK · WANTED +1');
+    burst(game.shots, closest.x, closest.y, '#ffe45c', 10, game.rng);
+  }
 }
 
-export function updatePlayer(player, game, dt) {
-  const keys = game.input.keys;
-  const has = (k) => keys.has(k);
-  if (player.cooldown > 0) player.cooldown -= dt;
-  if (player.hitFlash > 0) player.hitFlash -= dt;
+export function damagePlayer(player, amount, game) {
+  if (!player.alive) return;
+  player.health -= amount;
+  player.hurt = 0.25;
+  game.shake = Math.min(14, game.shake + amount * 0.18);
+  if (player.health <= 0) {
+    player.health = 0;
+    player.alive = false;
+  }
+}
+
+export function collectCash(player, world, game) {
+  for (let index = 0; index < world.cash.length; index += 1) {
+    const pickup = world.cash[index];
+    if (pickup.taken) continue;
+    if (Math.hypot(pickup.x - player.x, pickup.y - player.y) < 27) {
+      pickup.taken = true;
+      player.cash += pickup.value;
+      game.cashCollected += 1;
+      game.toast('CASH +' + pickup.value);
+      burst(game.shots, pickup.x, pickup.y, '#35ffae', 9, game.rng);
+    }
+  }
+}
+
+export function updatePlayer(player, input, world, dt, game) {
+  if (!player.alive) return;
+
+  player.shootCooldown = Math.max(0, player.shootCooldown - dt);
+  player.reloadTime = Math.max(0, player.reloadTime - dt);
+  player.hurt = Math.max(0, player.hurt - dt);
+  player.muzzle = Math.max(0, player.muzzle - dt);
+
+  const up = input.keys.has('KeyW') || input.keys.has('ArrowUp');
+  const down = input.keys.has('KeyS') || input.keys.has('ArrowDown');
+  const left = input.keys.has('KeyA') || input.keys.has('ArrowLeft');
+  const right = input.keys.has('KeyD') || input.keys.has('ArrowRight');
+  const sprint = input.keys.has('ShiftLeft') || input.keys.has('ShiftRight');
 
   if (player.inCar && player.car) {
     const car = player.car;
-    const throttle = (has('w') || has('arrowup') ? 1 : 0) - (has('s') || has('arrowdown') ? 1 : 0);
-    const steer = (has('d') || has('arrowright') ? 1 : 0) - (has('a') || has('arrowleft') ? 1 : 0);
-    const handbrake = has(' ');
-    if (throttle > 0) car.speed += 0.085 * dt;
-    else if (throttle < 0) car.speed -= 0.105 * dt;
-    car.speed *= Math.pow(0.982, dt);
-    if (handbrake) car.speed *= Math.pow(0.93, dt);
-    car.speed = clamp(car.speed, -0.75, car.maxSpeed);
-    const grip = clamp(Math.abs(car.speed) / 0.42, 0, 1);
-    car.angle = wrapAngle(car.angle + steer * (handbrake ? 0.07 : 0.05) * grip * (car.speed >= 0 ? 1 : -1) * dt);
-    const nx = car.x + Math.cos(car.angle) * car.speed * dt;
-    const ny = car.y + Math.sin(car.angle) * car.speed * dt;
-    if (collide(player, nx, ny, game)) {
-      if (Math.abs(car.speed) > 1.1) {
-        damagePlayer(player, 2, game);
-        game.combat.burst(car.x, car.y, '#ff8a3d', 5);
-      }
-      car.speed *= -0.28;
-    } else {
-      car.x = nx;
-      car.y = ny;
+    if (up) car.speed += 145 * dt;
+    if (down) car.speed -= 185 * dt;
+    car.speed *= Math.pow(0.42, dt);
+    car.speed = clamp(car.speed, -70, TOP_SPEED);
+    const steer = (right ? 1 : 0) - (left ? 1 : 0);
+    car.heading += steer * 2.35 * dt * (car.speed >= 0 ? 1 : -1);
+    car.x += Math.cos(car.heading) * car.speed * dt;
+    car.y += Math.sin(car.heading) * car.speed * dt;
+    if (resolveBuildings(car, world, 17)) {
+      car.speed *= -0.22;
+      damagePlayer(player, 2, game);
     }
+    clampEntity(car, 17);
     player.x = car.x;
     player.y = car.y;
-    player.angle = car.angle;
-    player.walkPhase += Math.abs(car.speed) * dt * 0.3;
-  } else {
-    let mx = (has('d') || has('arrowright') ? 1 : 0) - (has('a') || has('arrowleft') ? 1 : 0);
-    let my = (has('s') || has('arrowdown') ? 1 : 0) - (has('w') || has('arrowup') ? 1 : 0);
-    const len = Math.hypot(mx, my);
-    if (len > 0) {
-      mx /= len;
-      my /= len;
-      const nx = clamp(player.x + mx * 0.16 * dt, 10, WORLD - 10);
-      const ny = clamp(player.y + my * 0.16 * dt, 10, WORLD - 10);
-      if (!pointInBuilding(game.world, nx, ny)) { player.x = nx; player.y = ny; }
-      player.walkPhase += dt * 0.35;
+    player.angle = car.heading;
+    player.driveDistance += Math.abs(car.speed) * dt;
+
+    if (Math.abs(car.speed) > 70) {
+      for (let index = 0; index < world.pedestrians.length; index += 1) {
+        const person = world.pedestrians[index];
+        if (person.hit) continue;
+        if (Math.hypot(person.x - car.x, person.y - car.y) < 20) {
+          person.hit = true;
+          player.wanted = Math.min(5, player.wanted + 1);
+          game.toast('HIT AND RUN · WANTED +1');
+          burst(game.shots, person.x, person.y, '#ff4d6d', 8, game.rng);
+        }
+      }
     }
-    const wm = game.worldMouse;
-    if (wm) player.angle = Math.atan2(wm.y - player.y, wm.x - player.x);
+  } else {
+    const dx = (right ? 1 : 0) - (left ? 1 : 0);
+    const dy = (down ? 1 : 0) - (up ? 1 : 0);
+    const length = Math.hypot(dx, dy) || 1;
+    const speed = sprint ? 252 : 172;
+    player.x += (dx / length) * speed * dt;
+    player.y += (dy / length) * speed * dt;
+    resolveBuildings(player, world, 11);
+    clampEntity(player, 11);
+    const aimX = input.aimX - player.x;
+    const aimY = input.aimY - player.y;
+    if (Math.hypot(aimX, aimY) > 2) player.angle = Math.atan2(aimY, aimX);
   }
 
-  if (game.input.down && player.cooldown <= 0) {
-    const aim = player.inCar ? Math.atan2(game.worldMouse.y - player.y, game.worldMouse.x - player.x) : player.angle;
-    const ox = Math.cos(aim) * 17;
-    const oy = Math.sin(aim) * 17;
-    game.combat.spawn(player.x + ox, player.y + oy, aim, 'player', 5.4, '#ffe66b');
-    player.shotsFired++;
-    player.cooldown = player.inCar ? 13 : 9;
-    player.ammo--;
-    game.combat.burst(player.x + ox, player.y + oy, '#fff3b0', 3);
-    if (player.ammo <= 0) { player.ammo = 14; player.cooldown = 38; game.toast('RELOADING'); }
-    if (player.shotsFired % 4 === 1) game.addWanted(1);
+  if (input.mouseDown && player.shootCooldown <= 0 && player.ammo > 0) {
+    fire(player, game, Math.atan2(input.aimY - player.y, input.aimX - player.x));
   }
+  if (input.action) toggleVehicle(player, world, game);
+  if (input.reload) beginReload(player, game);
+  if (player.reloadTime <= 0 && player.ammo === 0 && player.reserve > 0) beginReload(player, game);
 }

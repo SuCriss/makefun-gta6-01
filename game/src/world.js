@@ -1,209 +1,273 @@
-export const VIEW_W = 1280;
-export const VIEW_H = 720;
-export const CELL = 260;
-export const ROAD = 76;
-export const GRID = 9;
-export const WORLD = CELL * GRID;
+export const BLOCK = 260;
+export const ROAD = 72;
+export const GRID = 8;
+export const WORLD_W = BLOCK * GRID;
+export const WORLD_H = BLOCK * GRID;
 
-const BUILDING_FILLS = ['#16203c', '#22173f', '#102f3e', '#391a34', '#15303a', '#2a1e3e', '#1b2444'];
-const NEONS = ['#22e0ff', '#ff3ea5', '#ffd23f', '#9b6bff', '#3dffa8', '#ff7a45'];
-const CAR_COLORS = ['#ff3b5c', '#ffd23f', '#22e0ff', '#9b6bff', '#3dffa8', '#dfe9f2', '#ff8a3d'];
-const PED_COLORS = ['#ff6b9d', '#5ce1ff', '#ffd166', '#b388ff', '#7dffb0', '#ffffff'];
-const SIGN_WORDS = ['NOVA', 'ZEN', 'KIRA', 'VOLT', 'ONYX', 'LUNA', 'FLUX', 'RUSH'];
-const DISTRICTS = ['GLASS QUARTER', 'NEON DOCKS', 'SUNSET WARD', 'IRON MARKET', 'LUMEN CORE', 'AURORA ROW', 'OLD HARBOR', 'CIRCUIT FLATS', 'CRESCENT PARK'];
+export const CAR_COLORS = ['#e84393', '#0984e3', '#00b894', '#fdcb6e', '#6c5ce7', '#d63031', '#00cec9'];
+
+const NEON_COLORS = ['#20e6ff', '#ff3ec8', '#ffd34d', '#9a6bff', '#35ffae', '#ff7a4d'];
+const SIGN_WORDS = ['NOODLES', 'MOTEL', 'ARCADE', 'PAWN', 'CYBER', 'GARAGE', 'MART', 'BAR', 'CLUB', 'DATA', 'RAMEN', 'TAXI'];
+
+export const MISSIONS = [
+  { title: 'CASH RUN', desc: 'Collect 3 cash bundles', kind: 'cash', goal: 3, reward: 250 },
+  { title: 'JOYRIDE', desc: 'Steal a car and drive 700 m', kind: 'drive', goal: 700, reward: 400 },
+  { title: 'THREE STARS', desc: 'Reach wanted level 3', kind: 'wanted', goal: 3, reward: 700 },
+  { title: 'GHOST', desc: 'Shake off the police once', kind: 'evade', goal: 1, reward: 900 },
+  { title: 'NEON LEGEND', desc: 'Bank 3000 cash in total', kind: 'bank', goal: 3000, reward: 2000 },
+];
 
 export function makeRng(seed) {
-  let a = seed >>> 0;
-  return function () {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  let state = (seed >>> 0) || 0x9e3779b9;
+  return function next() {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let mixed = state;
+    mixed = Math.imul(mixed ^ (mixed >>> 15), mixed | 1);
+    mixed ^= mixed + Math.imul(mixed ^ (mixed >>> 7), mixed | 61);
+    return ((mixed ^ (mixed >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-export function rnd(rng, a, b) {
-  return a + (b - a) * rng();
+export function seedFromText(text) {
+  let hash = 2166136261;
+  for (let index = 0; index < text.length; index += 1) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
 }
 
-export function pick(rng, arr) {
-  return arr[Math.floor(rng() * arr.length) % arr.length];
+export function clamp(value, low, high) {
+  return Math.max(low, Math.min(high, value));
 }
 
-export function clamp(v, a, b) {
-  return v < a ? a : v > b ? b : v;
+function buildingRect(x, y, w, h, rng, gx, gy) {
+  return {
+    x: x,
+    y: y,
+    w: w,
+    h: h,
+    color: NEON_COLORS[Math.floor(rng() * NEON_COLORS.length)],
+    glow: 0.3 + rng() * 0.45,
+    rows: 3 + Math.floor(rng() * 6),
+    cols: 2 + Math.floor(rng() * 3),
+    sign: SIGN_WORDS[(gx * 5 + gy * 7 + Math.floor(rng() * SIGN_WORDS.length)) % SIGN_WORDS.length],
+    signVertical: rng() > 0.62,
+  };
 }
 
-export function wrapAngle(a) {
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a < -Math.PI) a += Math.PI * 2;
-  return a;
+export function createWorld(seed) {
+  const rng = makeRng(seed ^ 0x51ed270b);
+  const buildings = [];
+
+  for (let gy = 0; gy < GRID; gy += 1) {
+    for (let gx = 0; gx < GRID; gx += 1) {
+      const x0 = gx * BLOCK + ROAD / 2 + 14;
+      const y0 = gy * BLOCK + ROAD / 2 + 14;
+      const span = BLOCK - ROAD - 28;
+      const split = rng() > 0.5;
+
+      if (split) {
+        const horizontal = rng() > 0.5;
+        const ratio = 0.34 + rng() * 0.3;
+        if (horizontal) {
+          const band = span * ratio;
+          buildings.push(buildingRect(x0, y0, span, band, rng, gx, gy));
+          buildings.push(buildingRect(x0, y0 + band + 12, span, span - band - 12, rng, gx + 1, gy));
+        } else {
+          const band = span * ratio;
+          buildings.push(buildingRect(x0, y0, band, span, rng, gx, gy));
+          buildings.push(buildingRect(x0 + band + 12, y0, span - band - 12, span, rng, gx, gy + 1));
+        }
+      } else {
+        const inset = 4 + rng() * 14;
+        buildings.push(buildingRect(x0 + inset, y0 + inset, span - inset * 2, span - inset * 2, rng, gx, gy));
+      }
+    }
+  }
+
+  return { seed: seed, buildings: buildings, traffic: [], pedestrians: [], cash: [] };
 }
 
 export function isRoad(x, y) {
-  const mx = ((x % CELL) + CELL) % CELL;
-  const my = ((y % CELL) + CELL) % CELL;
-  const h = ROAD / 2;
-  return mx < h || mx > CELL - h || my < h || my > CELL - h;
-}
-
-export function clampToWorld(v) {
-  return clamp(v, 10, WORLD - 10);
-}
-
-export function districtName(x, y) {
-  const col = clamp(Math.floor(x / CELL), 0, GRID - 1);
-  const row = clamp(Math.floor(y / CELL), 0, GRID - 1);
-  return DISTRICTS[(col + row * 4) % DISTRICTS.length];
-}
-
-export function roadPoint(rng) {
-  const line = Math.floor(rng() * GRID);
-  const along = rnd(rng, 50, WORLD - 50);
-  if (rng() < 0.5) return { x: line * CELL, y: along, angle: Math.PI / 2 };
-  return { x: along, y: line * CELL, angle: 0 };
-}
-
-function makeWindows(rng, w, h) {
-  const out = [];
-  const step = 15;
-  for (let yy = 9; yy < h - 9; yy += step) {
-    for (let xx = 9; xx < w - 9; xx += step) {
-      if (rng() < 0.55) out.push({ x: xx, y: yy, lit: rng() < 0.72, hot: rng() < 0.12 });
-    }
-  }
-  return out;
-}
-
-export function createCar(rng, x, y, angle, parked) {
-  return {
-    x, y, angle,
-    color: pick(rng, CAR_COLORS),
-    speed: parked ? 0 : rnd(rng, 0.45, 0.9),
-    maxSpeed: rnd(rng, 1.15, 1.85),
-    turn: rng() < 0.5 ? -1 : 1,
-    hp: 3,
-    parked: !!parked,
-    stolen: false,
-    flash: 0,
-  };
-}
-
-export function createPed(rng, bx, by, bw, bh) {
-  const pad = 9;
-  const path = [
-    { x: bx - pad, y: by - pad },
-    { x: bx + bw + pad, y: by - pad },
-    { x: bx + bw + pad, y: by + bh + pad },
-    { x: bx - pad, y: by + bh + pad },
-  ];
-  const idx = Math.floor(rng() * path.length);
-  return {
-    x: path[idx].x,
-    y: path[idx].y,
-    path,
-    idx,
-    angle: rng() * Math.PI * 2,
-    color: pick(rng, PED_COLORS),
-    speed: rnd(rng, 0.22, 0.42),
-    phase: rng() * 6.283,
-    alive: true,
-  };
+  const modX = ((x % BLOCK) + BLOCK) % BLOCK;
+  const modY = ((y % BLOCK) + BLOCK) % BLOCK;
+  const distX = Math.min(modX, BLOCK - modX);
+  const distY = Math.min(modY, BLOCK - modY);
+  return distX <= ROAD / 2 || distY <= ROAD / 2;
 }
 
 export function pointInBuilding(world, x, y) {
-  const list = world.buildings;
-  for (let i = 0; i < list.length; i++) {
-    const b = list[i];
-    if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
-  }
-  return null;
-}
-
-export function createWorld(seed, shot) {
-  const rng = makeRng((seed ^ 0x9e3779b9) >>> 0);
-  const blocks = [];
-  const buildings = [];
-  const lamps = [];
-  const parked = [];
-  const peds = [];
-  const money = [];
-  const trees = [];
-
-  for (let gy = 0; gy < GRID; gy++) {
-    for (let gx = 0; gx < GRID; gx++) {
-      const bx = gx * CELL + ROAD / 2 + 12;
-      const by = gy * CELL + ROAD / 2 + 12;
-      const bw = CELL - ROAD - 24;
-      const bh = CELL - ROAD - 24;
-      blocks.push({ x: bx, y: by, w: bw, h: bh, tone: rng() < 0.5 ? 0 : 1 });
-
-      const sub = bw / 2;
-      for (let sy = 0; sy < 2; sy++) {
-        for (let sx = 0; sx < 2; sx++) {
-          if (rng() < 0.1) {
-            trees.push({ x: bx + sx * sub + sub * 0.5, y: by + sy * sub + sub * 0.5, r: rnd(rng, 9, 14) });
-            continue;
-          }
-          const pad = rnd(rng, 6, 12);
-          const wx = bx + sx * sub + pad;
-          const wy = by + sy * sub + pad;
-          const ww = sub - pad * 2;
-          const wh = sub - pad * 2;
-          buildings.push({
-            x: wx, y: wy, w: ww, h: wh,
-            fill: pick(rng, BUILDING_FILLS),
-            neon: pick(rng, NEONS),
-            windows: makeWindows(rng, ww, wh),
-            sign: rng() < 0.32 ? pick(rng, SIGN_WORDS) : null,
-            antenna: rng() < 0.22,
-          });
-        }
-      }
-
-      lamps.push(
-        { x: bx - 8, y: by - 8 },
-        { x: bx + bw + 8, y: by - 8 },
-        { x: bx - 8, y: by + bh + 8 },
-        { x: bx + bw + 8, y: by + bh + 8 },
-      );
-
-      if (rng() < 0.7) {
-        const side = Math.floor(rng() * 4);
-        let px, py, ang;
-        if (side === 0) { px = bx + bw * rng(); py = gy * CELL + ROAD / 2 - 13; ang = 0; }
-        else if (side === 1) { px = bx + bw * rng(); py = (gy + 1) * CELL - ROAD / 2 + 13; ang = 0; }
-        else if (side === 2) { px = gx * CELL + ROAD / 2 - 13; py = by + bh * rng(); ang = Math.PI / 2; }
-        else { px = (gx + 1) * CELL - ROAD / 2 + 13; py = by + bh * rng(); ang = Math.PI / 2; }
-        parked.push(createCar(rng, px, py, ang, true));
-      }
-
-      if (rng() < 0.55) {
-        money.push({
-          x: bx + bw * rng(),
-          y: by + bh * rng(),
-          value: rng() < 0.2 ? 100 : 25,
-          taken: false,
-          phase: rng() * 6.283,
-        });
-      }
-
-      peds.push(createPed(rng, bx, by, bw, bh));
-      if (rng() < 0.35) peds.push(createPed(rng, bx, by, bw, bh));
+  for (let index = 0; index < world.buildings.length; index += 1) {
+    const rect = world.buildings[index];
+    if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
+      return true;
     }
   }
+  return false;
+}
 
-  const missionPoints = [
-    { x: CELL * 3 + ROAD / 2, y: CELL * 3 + ROAD / 2 },
-    { x: CELL * 6 + ROAD / 2, y: CELL * 4 + ROAD / 2 },
-    { x: CELL * 5 + ROAD / 2, y: CELL * 6 + ROAD / 2 },
-  ];
+export function resolveBuildings(entity, world, radius) {
+  let collided = false;
+  for (let index = 0; index < world.buildings.length; index += 1) {
+    const rect = world.buildings[index];
+    const left = rect.x - radius;
+    const right = rect.x + rect.w + radius;
+    const top = rect.y - radius;
+    const bottom = rect.y + rect.h + radius;
+    if (entity.x > left && entity.x < right && entity.y > top && entity.y < bottom) {
+      const pushLeft = entity.x - left;
+      const pushRight = right - entity.x;
+      const pushTop = entity.y - top;
+      const pushBottom = bottom - entity.y;
+      const smallest = Math.min(pushLeft, pushRight, pushTop, pushBottom);
+      if (smallest === pushLeft) entity.x = left;
+      else if (smallest === pushRight) entity.x = right;
+      else if (smallest === pushTop) entity.y = top;
+      else entity.y = bottom;
+      collided = true;
+    }
+  }
+  return collided;
+}
 
-  const spawn = { x: CELL * 4 + ROAD / 2 - 6, y: CELL * 4 + 8, angle: -0.08 };
+export function clampEntity(entity, radius) {
+  entity.x = clamp(entity.x, radius, WORLD_W - radius);
+  entity.y = clamp(entity.y, radius, WORLD_H - radius);
+}
 
-  return {
-    seed, shot, blocks, buildings, lamps, parked, peds, money, trees, missionPoints, spawn,
-    dims: { WORLD, CELL, ROAD, GRID },
-  };
+export function spawnTraffic(world, rng, count) {
+  const cars = [];
+  const headings = [0, Math.PI / 2, Math.PI, -Math.PI / 2];
+  for (let index = 0; index < count; index += 1) {
+    const horizontal = rng() > 0.5;
+    const lane = (rng() > 0.5 ? 1 : -1) * ROAD * 0.24;
+    let x;
+    let y;
+    let dir;
+    if (horizontal) {
+      const row = 1 + Math.floor(rng() * (GRID - 1));
+      y = row * BLOCK + lane;
+      dir = rng() > 0.5 ? 0 : 2;
+      x = rng() * WORLD_W;
+    } else {
+      const col = 1 + Math.floor(rng() * (GRID - 1));
+      x = col * BLOCK + lane;
+      dir = rng() > 0.5 ? 1 : 3;
+      y = rng() * WORLD_H;
+    }
+    cars.push({
+      x: x,
+      y: y,
+      dir: dir,
+      heading: headings[dir],
+      speed: 44 + rng() * 46,
+      color: CAR_COLORS[Math.floor(rng() * CAR_COLORS.length)],
+      stolen: false,
+      controlled: false,
+      police: false,
+      w: 30,
+      h: 16,
+    });
+  }
+  world.traffic = cars;
+  return cars;
+}
+
+export function updateTraffic(cars, dt) {
+  for (let index = 0; index < cars.length; index += 1) {
+    const car = cars[index];
+    if (car.controlled) continue;
+    const distance = car.speed * dt;
+    if (car.dir === 0) {
+      car.x += distance;
+      if (car.x > WORLD_W + 50) car.x = -50;
+    } else if (car.dir === 2) {
+      car.x -= distance;
+      if (car.x < -50) car.x = WORLD_W + 50;
+    } else if (car.dir === 1) {
+      car.y += distance;
+      if (car.y > WORLD_H + 50) car.y = -50;
+    } else {
+      car.y -= distance;
+      if (car.y < -50) car.y = WORLD_H + 50;
+    }
+  }
+}
+
+export function spawnPedestrians(world, rng, count) {
+  const list = [];
+  const skins = ['#ffd8a8', '#e0ac69', '#8d5524', '#f1c27d'];
+  const shirts = ['#20e6ff', '#ff3ec8', '#ffd34d', '#9a6bff', '#35ffae'];
+  for (let index = 0; index < count; index += 1) {
+    const gx = Math.floor(rng() * GRID);
+    const gy = Math.floor(rng() * GRID);
+    const side = Math.floor(rng() * 4);
+    const inset = ROAD / 2 + 8;
+    let homeX;
+    let homeY;
+    let axis;
+    if (side === 0) {
+      homeX = gx * BLOCK + inset;
+      homeY = gy * BLOCK + BLOCK / 2;
+      axis = 'y';
+    } else if (side === 1) {
+      homeX = (gx + 1) * BLOCK - inset;
+      homeY = gy * BLOCK + BLOCK / 2;
+      axis = 'y';
+    } else if (side === 2) {
+      homeX = gx * BLOCK + BLOCK / 2;
+      homeY = gy * BLOCK + inset;
+      axis = 'x';
+    } else {
+      homeX = gx * BLOCK + BLOCK / 2;
+      homeY = (gy + 1) * BLOCK - inset;
+      axis = 'x';
+    }
+    list.push({
+      x: homeX,
+      y: homeY,
+      homeX: homeX,
+      homeY: homeY,
+      axis: axis,
+      range: 26 + rng() * 52,
+      phase: rng() * 6.283,
+      speed: 16 + rng() * 22,
+      dir: rng() > 0.5 ? 1 : -1,
+      skin: skins[Math.floor(rng() * skins.length)],
+      shirt: shirts[Math.floor(rng() * shirts.length)],
+      hit: false,
+    });
+  }
+  world.pedestrians = list;
+  return list;
+}
+
+export function updatePedestrians(list, dt) {
+  for (let index = 0; index < list.length; index += 1) {
+    const person = list[index];
+    const offset = person.axis === 'x' ? person.x - person.homeX : person.y - person.homeY;
+    if (offset > person.range) person.dir = -1;
+    if (offset < -person.range) person.dir = 1;
+    const movement = person.speed * person.dir * dt;
+    if (person.axis === 'x') person.x += movement;
+    else person.y += movement;
+  }
+}
+
+export function spawnCash(world, rng, count) {
+  const list = [];
+  for (let index = 0; index < count; index += 1) {
+    const col = 1 + Math.floor(rng() * (GRID - 1));
+    const row = 1 + Math.floor(rng() * (GRID - 1));
+    list.push({
+      x: col * BLOCK + (rng() - 0.5) * ROAD * 0.75,
+      y: row * BLOCK + (rng() - 0.5) * ROAD * 0.75,
+      value: 50 + Math.floor(rng() * 5) * 25,
+      taken: false,
+      phase: rng() * 6.283,
+    });
+  }
+  world.cash = list;
+  return list;
 }

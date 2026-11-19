@@ -1,107 +1,104 @@
-import { WORLD, clamp, pointInBuilding, rnd } from './world.js';
-import { damagePlayer } from './player.js';
+import { pointInBuilding, WORLD_W, WORLD_H } from './world.js';
 
-export function createCombat(rng) {
-  return { shots: [], particles: [], rng };
+export function createShots() {
+  return { bullets: [], particles: [] };
 }
 
-export function spawn(combat, x, y, angle, owner, speed, color) {
-  combat.shots.push({
-    x, y, angle, owner, color,
-    vx: Math.cos(angle) * speed,
-    vy: Math.sin(angle) * speed,
-    life: 150,
-    trail: [],
+export function fireShot(system, x, y, angle, owner, speed, damage, color, rng) {
+  const aim = angle + (rng() - 0.5) * 0.02;
+  system.bullets.push({
+    x: x,
+    y: y,
+    vx: Math.cos(aim) * speed,
+    vy: Math.sin(aim) * speed,
+    life: 1.7,
+    owner: owner,
+    damage: damage,
+    color: color,
   });
 }
 
-export function burst(combat, x, y, color, count) {
-  const rng = combat.rng;
-  for (let i = 0; i < count; i++) {
-    const a = rng() * Math.PI * 2;
-    const s = rnd(rng, 0.3, 1.5);
-    combat.particles.push({
-      x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s,
-      life: rnd(rng, 14, 30), max: 30, color, size: rnd(rng, 1.5, 3.6),
+export function burst(system, x, y, color, count, rng) {
+  for (let index = 0; index < count; index += 1) {
+    const angle = rng() * Math.PI * 2;
+    const speed = 35 + rng() * 140;
+    system.particles.push({
+      x: x,
+      y: y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.3 + rng() * 0.45,
+      color: color,
     });
   }
 }
 
-export function explosion(combat, x, y) {
-  burst(combat, x, y, '#ffd23f', 18);
-  burst(combat, x, y, '#ff5b2e', 14);
-  burst(combat, x, y, '#5a5f70', 10);
-}
+export function updateShots(system, world, dt, hooks) {
+  const bullets = system.bullets;
 
-export function updateCombat(combat, game, dt) {
-  const world = game.world;
-  const shots = combat.shots;
+  for (let index = 0; index < bullets.length; index += 1) {
+    const bullet = bullets[index];
+    bullet.x += bullet.vx * dt;
+    bullet.y += bullet.vy * dt;
+    bullet.life -= dt;
 
-  for (let i = shots.length - 1; i >= 0; i--) {
-    const s = shots[i];
-    s.trail.push({ x: s.x, y: s.y });
-    if (s.trail.length > 5) s.trail.shift();
-    const nx = s.x + s.vx * dt;
-    const ny = s.y + s.vy * dt;
-    s.life -= dt;
-    let dead = s.life <= 0 || nx < 6 || ny < 6 || nx > WORLD - 6 || ny > WORLD - 6;
-
-    if (!dead && pointInBuilding(world, nx, ny)) {
-      burst(combat, nx, ny, s.color, 4);
-      dead = true;
+    if (bullet.x < 0 || bullet.y < 0 || bullet.x > WORLD_W || bullet.y > WORLD_H || pointInBuilding(world, bullet.x, bullet.y)) {
+      bullet.life = 0;
+      burst(system, bullet.x, bullet.y, bullet.color, 4, hooks.rng);
+      continue;
     }
 
-    if (!dead && s.owner === 'player') {
-      for (let k = game.police.length - 1; k >= 0; k--) {
-        const c = game.police[k];
-        if (Math.hypot(c.x - nx, c.y - ny) < 21) {
-          c.hp -= 1;
-          burst(combat, nx, ny, '#9be7ff', 6);
-          dead = true;
-          if (c.hp <= 0) {
-            explosion(combat, c.x, c.y);
-            game.police.splice(k, 1);
-            game.onKill('police');
+    if (bullet.owner === 'player') {
+      for (let carIndex = 0; carIndex < world.traffic.length; carIndex += 1) {
+        const car = world.traffic[carIndex];
+        if (Math.hypot(car.x - bullet.x, car.y - bullet.y) < 17) {
+          bullet.life = 0;
+          car.speed *= 0.6;
+          burst(system, bullet.x, bullet.y, '#ffe45c', 8, hooks.rng);
+          break;
+        }
+      }
+      if (bullet.life > 0) {
+        for (let carIndex = 0; carIndex < hooks.police.cars.length; carIndex += 1) {
+          const car = hooks.police.cars[carIndex];
+          if (Math.hypot(car.x - bullet.x, car.y - bullet.y) < 18) {
+            bullet.life = 0;
+            car.speed *= 0.7;
+            burst(system, bullet.x, bullet.y, '#9fd8ff', 9, hooks.rng);
+            break;
           }
-          break;
         }
       }
-    }
-
-    if (!dead && s.owner === 'player') {
-      for (let k = 0; k < world.peds.length; k++) {
-        const ped = world.peds[k];
-        if (ped.alive && Math.hypot(ped.x - nx, ped.y - ny) < 11) {
-          ped.alive = false;
-          burst(combat, ped.x, ped.y, '#ff6b9d', 5);
-          dead = true;
-          game.onKill('ped');
-          break;
+      if (bullet.life > 0) {
+        for (let officerIndex = 0; officerIndex < hooks.police.officers.length; officerIndex += 1) {
+          const officer = hooks.police.officers[officerIndex];
+          if (Math.hypot(officer.x - bullet.x, officer.y - bullet.y) < 12) {
+            bullet.life = 0;
+            officer.dead = true;
+            burst(system, bullet.x, bullet.y, '#ff5b6e', 10, hooks.rng);
+            break;
+          }
         }
       }
+    } else if (Math.hypot(hooks.player.x - bullet.x, hooks.player.y - bullet.y) < 14) {
+      hooks.damagePlayer(bullet.damage);
+      bullet.life = 0;
+      burst(system, bullet.x, bullet.y, '#ff5b6e', 6, hooks.rng);
     }
-
-    if (!dead && s.owner === 'police') {
-      const p = game.player;
-      if (Math.hypot(p.x - nx, p.y - ny) < 17) {
-        damagePlayer(p, p.inCar ? 5 : 8, game);
-        burst(combat, nx, ny, '#ff4d5e', 6);
-        dead = true;
-      }
-    }
-
-    if (dead) shots.splice(i, 1);
-    else { s.x = nx; s.y = ny; }
   }
 
-  const parts = combat.particles;
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const p = parts[i];
-    p.life -= dt;
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
-    p.vx *= Math.pow(0.94, dt);
-    p.vy *= Math.pow(0.94, dt);
-    if (p.life <= 0) parts.splice(i, 1);
+  system.bullets = bullets.filter(function (bullet) { return bullet.life > 0; });
+  if (hooks.police) {
+    hooks.police.officers = hooks.police.officers.filter(function (officer) { return !officer.dead; });
   }
+
+  for (let index = 0; index < system.particles.length; index += 1) {
+    const particle = system.particles[index];
+    particle.x += particle.vx * dt;
+    particle.y += particle.vy * dt;
+    particle.vx *= Math.pow(0.06, dt);
+    particle.vy *= Math.pow(0.06, dt);
+    particle.life -= dt;
+  }
+  system.particles = system.particles.filter(function (particle) { return particle.life > 0; });
 }
