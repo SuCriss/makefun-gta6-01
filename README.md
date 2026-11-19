@@ -1,20 +1,18 @@
-# Neon Hustle — make.fun gta6-01
+# makefun-gta6-01
 
-[![Live on make.fun](https://make.fun/api/badge/SuCriss/makefun-gta6-01/live.svg)](https://make.fun/g/SuCriss/makefun-gta6-01)
-[![Plays on make.fun](https://make.fun/api/badge/SuCriss/makefun-gta6-01/plays.svg)](https://make.fun/g/SuCriss/makefun-gta6-01)
-[![Rating on make.fun](https://make.fun/api/badge/SuCriss/makefun-gta6-01/rating.svg)](https://make.fun/g/SuCriss/makefun-gta6-01)
+[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![rank](https://make.fun/badge/gta6-01/SuCriss/makefun-gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![reward](https://make.fun/badge/gta6-01/SuCriss/makefun-gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
 
-Neon Hustle is a polished top-down open-world crime game: cruise a neon city grid, steal cars, outrun wanted stars, trade bullets with the police, grab cash, and climb a chain of story missions. Everything runs offline from static HTML, CSS, and ES modules.
+Neon Hustle is a deterministic offline open-world crime game with a neon city, vehicles, police pursuit, contracts and browser screenshots.
 
-## Controls
-- **WASD / Arrows** — walk or steer
-- **Mouse** — aim, **Click** — fire, **R** — reload
-- **Space / E** — steal or leave a car
-- **Shift** — sprint, **P** — pause, **Enter** — start, **R** (on results) — restart
+## Run it
 
-## Deterministic scenes
-Add `?shot=start`, `?shot=play`, or `?shot=end&seed=1` to render a stable, labelled composition immediately.
+```sh
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+```
 
 ---
 
-Built for [make.fun](https://make.fun/r/ht7k58e4). Join via my referral link: https://make.fun/r/ht7k58e4
+<sub>Entered on [make.fun](https://make.fun/?ref=ht7k58e4&utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
+
