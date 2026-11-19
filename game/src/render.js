@@ -1,510 +1,452 @@
-const FONT = '"Trebuchet MS", "Segoe UI", system-ui, sans-serif';
+import { CITY, carAngle } from "./world.js";
+import { playerPosition } from "./player.js";
 
-function money(value) {
-  const text = String(Math.floor(value));
-  return text.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-}
+const VIEW_W = 1280;
+const VIEW_H = 720;
 
-export function roundRect(ctx, x, y, w, h, r) {
-  const rr = Math.max(0, Math.min(r, w / 2, h / 2));
+function roundRect(ctx, x, y, width, height, radius) {
+  const r = Math.min(radius, width * 0.5, height * 0.5);
   ctx.beginPath();
-  ctx.moveTo(x + rr, y);
-  ctx.arcTo(x + w, y, x + w, y + h, rr);
-  ctx.arcTo(x + w, y + h, x, y + h, rr);
-  ctx.arcTo(x, y + h, x, y, rr);
-  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + width - r, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+  ctx.lineTo(x + width, y + height - r);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  ctx.lineTo(x + r, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
   ctx.closePath();
 }
 
-export function neonText(ctx, text, x, y, size, color, align = "left", weight = "700") {
+function glow(ctx, hue, blur, draw) {
   ctx.save();
-  ctx.font = weight + " " + size + "px " + FONT;
-  ctx.textAlign = align;
-  ctx.textBaseline = "middle";
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 18;
-  ctx.fillStyle = color;
-  ctx.fillText(text, x, y);
-  ctx.shadowBlur = 0;
-  ctx.globalAlpha = 0.35;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText(text, x, y);
+  ctx.shadowColor = "hsla(" + hue + ",100%,65%,0.9)";
+  ctx.shadowBlur = blur;
+  draw();
   ctx.restore();
 }
 
-function drawBackdrop(ctx, w, h) {
-  const wash = ctx.createLinearGradient(0, 0, 0, h);
-  wash.addColorStop(0, "#070a18");
-  wash.addColorStop(0.55, "#0b0f20");
-  wash.addColorStop(1, "#140a1d");
-  ctx.fillStyle = wash;
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = "rgba(90,130,200,0.06)";
-  ctx.lineWidth = 1;
-  for (let x = 0; x < w; x += 40) {
-    ctx.beginPath(); ctx.moveTo(x + 0.5, 0); ctx.lineTo(x + 0.5, h); ctx.stroke();
-  }
-  for (let y = 0; y < h; y += 40) {
-    ctx.beginPath(); ctx.moveTo(0, y + 0.5); ctx.lineTo(w, y + 0.5); ctx.stroke();
-  }
+function inView(x, y, cam, margin) {
+  return x > cam.x - margin && y > cam.y - margin && x < cam.x + VIEW_W + margin && y < cam.y + VIEW_H + margin;
 }
 
-function drawRoads(ctx, world, cam, w, h) {
-  const t = world.tile;
-  const x0 = Math.max(0, Math.floor(cam.x / t) - 1);
-  const x1 = Math.min(world.cols - 1, Math.ceil((cam.x + w) / t) + 1);
-  const y0 = Math.max(0, Math.floor(cam.y / t) - 1);
-  const y1 = Math.min(world.rows - 1, Math.ceil((cam.y + h) / t) + 1);
-  for (let ty = y0; ty <= y1; ty++) {
-    for (let tx = x0; tx <= x1; tx++) {
-      if (tx % 4 !== 0 && ty % 4 !== 0) continue;
-      const sx = tx * t - cam.x;
-      const sy = ty * t - cam.y;
-      ctx.fillStyle = "#0e1424";
-      ctx.fillRect(sx, sy, t, t);
-      ctx.fillStyle = "rgba(130,170,230,0.11)";
-      if (tx % 4 === 0) ctx.fillRect(sx + t / 2 - 1, sy, 2, t);
-      if (ty % 4 === 0) ctx.fillRect(sx, sy + t / 2 - 1, t, 2);
-      ctx.strokeStyle = "rgba(40,231,255,0.06)";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(sx + 0.5, sy + 0.5, t - 1, t - 1);
+function drawGround(ctx, cam) {
+  ctx.fillStyle = "#050811";
+  ctx.fillRect(cam.x - 100, cam.y - 100, VIEW_W + 200, VIEW_H + 200);
+}
+
+function drawRoads(ctx, cam) {
+  const step = CITY.block;
+  const half = CITY.road * 0.5;
+  const fromX = Math.max(0, Math.floor((cam.x - step) / step));
+  const toX = Math.min(Math.ceil(CITY.width / step), Math.ceil((cam.x + VIEW_W + step) / step));
+  const fromY = Math.max(0, Math.floor((cam.y - step) / step));
+  const toY = Math.min(Math.ceil(CITY.height / step), Math.ceil((cam.y + VIEW_H + step) / step));
+
+  for (let ix = fromX; ix <= toX; ix += 1) {
+    const x = ix * step - half;
+    ctx.fillStyle = "#11172b";
+    ctx.fillRect(x, cam.y - 100, CITY.road, VIEW_H + 200);
+    ctx.fillStyle = "rgba(57,246,255,0.10)";
+    ctx.fillRect(x, cam.y - 100, 2, VIEW_H + 200);
+    ctx.fillRect(x + CITY.road - 2, cam.y - 100, 2, VIEW_H + 200);
+    ctx.fillStyle = "rgba(255,209,102,0.28)";
+    for (let y = Math.floor((cam.y - 100) / 48) * 48; y < cam.y + VIEW_H + 100; y += 48) {
+      ctx.fillRect(x + CITY.road * 0.5 - 1, y, 2, 18);
+    }
+  }
+
+  for (let iy = fromY; iy <= toY; iy += 1) {
+    const y = iy * step - half;
+    ctx.fillStyle = "#11172b";
+    ctx.fillRect(cam.x - 100, y, VIEW_W + 200, CITY.road);
+    ctx.fillStyle = "rgba(255,62,165,0.09)";
+    ctx.fillRect(cam.x - 100, y, VIEW_W + 200, 2);
+    ctx.fillRect(cam.x - 100, y + CITY.road - 2, VIEW_W + 200, 2);
+    ctx.fillStyle = "rgba(255,209,102,0.28)";
+    for (let x = Math.floor((cam.x - 100) / 48) * 48; x < cam.x + VIEW_W + 100; x += 48) {
+      ctx.fillRect(x, y + CITY.road * 0.5 - 1, 18, 2);
     }
   }
 }
 
-function drawBuildings(ctx, world, cam, w, h) {
-  for (const b of world.buildings) {
-    const sx = b.x - cam.x;
-    const sy = b.y - cam.y;
-    if (sx > w + 40 || sy > h + 40 || sx + b.w < -40 || sy + b.h < -40) continue;
+function drawCityBlocks(ctx, world, cam, tick) {
+  const step = CITY.block;
+  for (const plaza of world.plazas) {
+    if (!inView(plaza.x, plaza.y, cam, plaza.w)) continue;
+    ctx.fillStyle = "rgba(24,64,58,0.55)";
+    ctx.fillRect(plaza.x, plaza.y, plaza.w, plaza.h);
+    ctx.strokeStyle = "hsla(" + plaza.hue + ",90%,55%,0.28)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(plaza.x + 8, plaza.y + 8, plaza.w - 16, plaza.h - 16);
+    ctx.beginPath();
+    ctx.arc(plaza.x + plaza.w * 0.5, plaza.y + plaza.h * 0.5, 18 + Math.sin(tick + plaza.x) * 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  for (const building of world.buildings) {
+    if (!inView(building.x, building.y, cam, building.w + 20)) continue;
     ctx.fillStyle = "rgba(0,0,0,0.5)";
-    ctx.fillRect(sx + 4, sy + 6, b.w, b.h);
-    ctx.fillStyle = b.facade;
-    ctx.fillRect(sx, sy, b.w, b.h);
-    ctx.globalAlpha = 0.6;
-    ctx.strokeStyle = b.neon;
+    ctx.fillRect(building.x + 9, building.y + 11, building.w, building.h);
+    const surface = ctx.createLinearGradient(building.x, building.y, building.x + building.w, building.y + building.h);
+    surface.addColorStop(0, "hsl(" + building.hue + ",48%,16%)");
+    surface.addColorStop(1, "#080c19");
+    ctx.fillStyle = surface;
+    ctx.fillRect(building.x, building.y, building.w, building.h);
+    ctx.strokeStyle = "hsla(" + building.hue + ",100%,66%,0.82)";
     ctx.lineWidth = 2;
-    ctx.strokeRect(sx + 1, sy + 1, b.w - 2, b.h - 2);
-    ctx.globalAlpha = 0.24;
-    ctx.fillStyle = b.neon;
-    for (let j = 0; j < 4; j++) {
-      for (let i = 0; i < 4; i++) {
-        if ((i * 7 + j * 13 + b.variant * 29) % 5 < 2) {
-          ctx.fillRect(sx + 10 + i * 16, sy + 10 + j * 16, 6, 5);
-        }
+    ctx.strokeRect(building.x + 1, building.y + 1, building.w - 2, building.h - 2);
+
+    const pad = 9;
+    const innerW = Math.max(0, building.w - pad * 2);
+    const innerH = Math.max(0, building.h - pad * 2);
+    const cellW = innerW / building.cols;
+    const cellH = innerH / building.rows;
+    for (let row = 0; row < building.rows; row += 1) {
+      for (let col = 0; col < building.cols; col += 1) {
+        const lit = (row * 13 + col * 7 + building.seed) % 6 < 3;
+        ctx.fillStyle = lit ? "hsla(" + building.hue + ",100%,74%,0.55)" : "rgba(4,8,18,0.85)";
+        ctx.fillRect(building.x + pad + col * cellW + 2, building.y + pad + row * cellH + 2, Math.max(2, cellW - 5), Math.max(2, cellH - 5));
       }
     }
-    ctx.globalAlpha = 1;
-    if (b.variant === 2) {
-      ctx.font = "700 11px " + FONT;
-      ctx.fillStyle = b.neon;
-      ctx.globalAlpha = 0.85;
-      ctx.fillText("NH", sx + 8, sy + b.h - 9);
-      ctx.globalAlpha = 1;
+
+    if (building.sign && building.w > 70) {
+      ctx.save();
+      ctx.font = "bold 11px 'Segoe UI', sans-serif";
+      const textWidth = ctx.measureText(building.sign).width;
+      const sx = building.x + building.w * 0.5 - textWidth * 0.5 - 8;
+      const sy = building.y + building.h * 0.5 - 10;
+      glow(ctx, building.hue, 12, () => {
+        ctx.fillStyle = "rgba(4,8,18,0.9)";
+        ctx.fillRect(sx, sy, textWidth + 16, 20);
+        ctx.strokeStyle = "hsla(" + building.hue + ",100%,70%,0.9)";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sx, sy, textWidth + 16, 20);
+        ctx.fillStyle = "hsl(" + building.hue + ",100%,78%)";
+        ctx.fillText(building.sign, sx + 8, sy + 14);
+      });
+      ctx.restore();
     }
+  }
+
+  for (const light of world.lights) {
+    if (!inView(light.x, light.y, cam, 40)) continue;
+    const pulse = 0.6 + 0.4 * Math.sin(tick * 2 + light.x * 0.01);
+    glow(ctx, light.hue, 14, () => {
+      ctx.fillStyle = "hsla(" + light.hue + ",100%,75%," + (0.45 + pulse * 0.35) + ")";
+      ctx.fillRect(light.x - 2, light.y - 2, 4, 4);
+    });
   }
 }
 
-function drawProps(ctx, world, cam, w, h) {
-  for (const p of world.props) {
-    const sx = p.x - cam.x;
-    const sy = p.y - cam.y;
-    if (sx < -30 || sy < -30 || sx > w + 30 || sy > h + 30) continue;
-    ctx.strokeStyle = p.neon;
-    ctx.globalAlpha = 0.7;
-    ctx.lineWidth = 2;
-    if (p.kind === "billboard") {
-      ctx.strokeRect(sx - 12, sy - 8, 24, 16);
-      ctx.globalAlpha = 0.22;
-      ctx.fillStyle = p.neon;
-      ctx.fillRect(sx - 10, sy - 6, 20, 12);
-    } else {
-      ctx.beginPath();
-      ctx.arc(sx, sy, 4, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
-  }
-}
-
-function drawCash(ctx, state, cam, w, h) {
-  for (const c of state.world.cash) {
-    if (c.taken) continue;
-    const sx = c.x - cam.x;
-    const sy = c.y - cam.y;
-    if (sx < -30 || sy < -30 || sx > w + 30 || sy > h + 30) continue;
+function drawPickups(ctx, world, cam, tick) {
+  for (const drop of world.pickups) {
+    if (drop.taken || !inView(drop.x, drop.y, cam, 40)) continue;
+    const bob = Math.sin(tick * 3 + drop.phase) * 4;
+    const y = drop.y + bob;
     ctx.save();
-    ctx.translate(sx, sy);
-    ctx.rotate(Math.PI / 4);
-    ctx.fillStyle = "#0d2b22";
-    ctx.strokeStyle = "#45ffb0";
-    ctx.lineWidth = 2;
-    ctx.fillRect(-9, -9, 18, 18);
-    ctx.strokeRect(-9, -9, 18, 18);
-    ctx.restore();
-    ctx.font = "700 10px " + FONT;
-    ctx.fillStyle = "#45ffb0";
+    ctx.translate(drop.x, y);
+    glow(ctx, 42, 16, () => {
+      ctx.rotate(Math.PI * 0.25);
+      ctx.fillStyle = "rgba(255,209,102,0.22)";
+      ctx.fillRect(-13, -13, 26, 26);
+      ctx.strokeStyle = "#ffd166";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-13, -13, 26, 26);
+    });
+    ctx.rotate(-Math.PI * 0.25);
+    ctx.font = "bold 14px monospace";
     ctx.textAlign = "center";
-    ctx.fillText("$", sx, sy + 3);
-  }
-}
-
-function drawCar(ctx, car, cam, isPolice) {
-  const sx = car.x - cam.x;
-  const sy = car.y - cam.y;
-  ctx.save();
-  ctx.translate(sx, sy);
-  ctx.rotate(car.angle);
-  ctx.fillStyle = "rgba(0,0,0,0.45)";
-  roundRect(ctx, -16, -9, 34, 20, 6);
-  ctx.fill();
-  if (isPolice) {
-    ctx.fillStyle = "#f2f5ff";
-    roundRect(ctx, -17, -10, 34, 20, 5);
-    ctx.fill();
-    ctx.fillStyle = "#10162a";
-    ctx.fillRect(-4, -10, 8, 20);
-    ctx.fillStyle = car.siren ? "#ff2d6f" : "#28e7ff";
-    ctx.shadowColor = ctx.fillStyle;
-    ctx.shadowBlur = 16;
-    ctx.fillRect(-3, -13, 6, 5);
-    ctx.shadowBlur = 0;
-  } else {
-    ctx.fillStyle = car.color || "#ff3d9a";
-    roundRect(ctx, -16, -9, 32, 18, 5);
-    ctx.fill();
-    ctx.fillStyle = "rgba(10,18,34,0.9)";
-    roundRect(ctx, -6, -7, 12, 14, 3);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.35)";
-    ctx.fillRect(9, -7, 4, 14);
-  }
-  ctx.restore();
-}
-
-function drawPerson(ctx, p, cam) {
-  const sx = p.x - cam.x;
-  const sy = p.y - cam.y;
-  ctx.save();
-  ctx.translate(sx, sy);
-  ctx.rotate(p.angle);
-  ctx.fillStyle = "rgba(0,0,0,0.4)";
-  ctx.beginPath();
-  ctx.ellipse(2, 3, 7, 5, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = p.color;
-  ctx.beginPath();
-  ctx.arc(0, 0, 5, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = p.skin;
-  ctx.beginPath();
-  ctx.arc(0, -2, 3, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawPlayer(ctx, state, cam) {
-  const p = state.player;
-  const sx = p.x - cam.x;
-  const sy = p.y - cam.y;
-  if (p.inCar) {
-    drawCar(ctx, { x: p.x, y: p.y, angle: p.angle, color: "#ff3d9a" }, cam, false);
-    ctx.fillStyle = "#ffd45e";
-    ctx.beginPath();
-    ctx.arc(sx, sy, 4, 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    ctx.save();
-    ctx.translate(sx, sy);
-    ctx.rotate(p.angle);
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.beginPath();
-    ctx.ellipse(2, 4, 10, 6, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#182238";
-    roundRect(ctx, -7, -7, 14, 14, 4);
-    ctx.fill();
-    ctx.strokeStyle = "#ff3d9a";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.fillStyle = "#ffcf9e";
-    ctx.beginPath();
-    ctx.arc(2, 0, 4, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#28e7ff";
-    ctx.fillRect(9, -2, 13, 4);
+    ctx.fillStyle = "#fff2c2";
+    ctx.fillText("$", 0, 5);
     ctx.restore();
   }
 }
 
-function drawShots(ctx, shots, cam) {
-  ctx.lineCap = "round";
-  for (const s of shots) {
-    const sx = s.x - cam.x;
-    const sy = s.y - cam.y;
-    ctx.strokeStyle = s.friendly ? "#ffe27a" : "#ff5470";
+function drawMissionMarker(ctx, state) {
+  const mission = state.world.missions[state.missionIndex];
+  if (!mission) return;
+  const cam = state.camera;
+  if (!inView(mission.x, mission.y, cam, 80)) return;
+  const pulse = 1 + Math.sin(state.tick * 3) * 0.12;
+  ctx.save();
+  glow(ctx, 42, 18, () => {
+    ctx.strokeStyle = "#ffd166";
     ctx.lineWidth = 3;
     ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(sx - s.vx * 0.02, sy - s.vy * 0.02);
+    ctx.arc(mission.x, mission.y, 26 * pulse, 0, Math.PI * 2);
     ctx.stroke();
-  }
-}
-
-function bar(ctx, x, y, w, h, value, maximum, color, label) {
-  ctx.fillStyle = "rgba(6,10,20,0.72)";
-  roundRect(ctx, x, y, w, h, 6);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(120,160,220,0.25)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  const pct = Math.max(0, Math.min(1, value / maximum));
-  if (pct > 0) {
-    ctx.fillStyle = color;
-    roundRect(ctx, x + 2, y + 2, (w - 4) * pct, h - 4, 4);
-    ctx.fill();
-  }
-  ctx.font = "700 10px " + FONT;
-  ctx.fillStyle = "#e6f0ff";
-  ctx.textAlign = "left";
-  ctx.fillText(label, x + 8, y + h / 2 + 1);
-}
-
-function star(ctx, cx, cy, r, filled) {
-  ctx.beginPath();
-  for (let i = 0; i < 10; i++) {
-    const a = -Math.PI / 2 + i * Math.PI / 5;
-    const rad = i % 2 === 0 ? r : r * 0.45;
-    const x = cx + Math.cos(a) * rad;
-    const y = cy + Math.sin(a) * rad;
-    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-  }
-  ctx.closePath();
-  if (filled) {
-    ctx.fillStyle = "#ffd45e";
-    ctx.shadowColor = "#ffd45e";
-    ctx.shadowBlur = 10;
-    ctx.fill();
-    ctx.shadowBlur = 0;
-  } else {
-    ctx.strokeStyle = "rgba(255,212,94,0.35)";
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-}
-
-function drawMinimap(ctx, state, x, y, size) {
-  ctx.save();
-  ctx.fillStyle = "rgba(4,8,16,0.82)";
-  roundRect(ctx, x, y, size, size, 10);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(40,231,255,0.3)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.beginPath();
-  roundRect(ctx, x + 2, y + 2, size - 4, size - 4, 8);
-  ctx.clip();
-  ctx.translate(x, y);
-  const scale = size / state.world.width;
-  ctx.fillStyle = "rgba(20,32,56,0.9)";
-  ctx.fillRect(0, 0, size, size);
-  ctx.fillStyle = "rgba(90,130,190,0.22)";
-  for (let ty = 0; ty < state.world.rows; ty += 4) {
-    ctx.fillRect(0, ty * state.world.tile * scale, size, 2);
-  }
-  for (let tx = 0; tx < state.world.cols; tx += 4) {
-    ctx.fillRect(tx * state.world.tile * scale, 0, 2, size);
-  }
-  const dot = (wx, wy, color, radius) => {
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(wx * scale, wy * scale, radius, 0, Math.PI * 2);
-    ctx.fill();
-  };
-  for (const c of state.world.cash) if (!c.taken) dot(c.x, c.y, "#45ffb0", 1.6);
-  for (const c of state.cars) dot(c.x, c.y, "#5f7fb0", 1.4);
-  for (const u of state.police) dot(u.x, u.y, "#ff5470", 2.2);
-  dot(state.player.x, state.player.y, "#28e7ff", 3.4);
-  ctx.restore();
-}
-
-function drawHud(ctx, state, w, h) {
-  const p = state.player;
-  ctx.save();
-  ctx.fillStyle = "rgba(5,9,18,0.62)";
-  roundRect(ctx, 16, 16, 214, 86, 12);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(40,231,255,0.18)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  neonText(ctx, "NEON HUSTLE", 28, 34, 14, "#28e7ff", "left", "800");
-  bar(ctx, 28, 48, 190, 12, p.health, 100, "#ff3d6e", "HP " + Math.round(p.health));
-  bar(ctx, 28, 66, 190, 12, p.armor, 100, "#7b61ff", "AR " + Math.round(p.armor));
-  ctx.font = "700 13px " + FONT;
-  ctx.fillStyle = "#45ffb0";
-  ctx.textAlign = "left";
-  ctx.fillText("$ " + money(p.cash), 28, 91);
-
-  const mission = state.world.missions[state.missionIndex % state.world.missions.length];
-  ctx.fillStyle = "rgba(5,9,18,0.72)";
-  roundRect(ctx, w / 2 - 178, 16, 356, 46, 10);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,61,154,0.35)";
-  ctx.stroke();
-  ctx.font = "700 11px " + FONT;
-  ctx.fillStyle = "#ff3d9a";
+  });
+  ctx.fillStyle = "rgba(255,209,102,0.12)";
+  ctx.fillRect(mission.x - 7, mission.y - 30, 14, 14);
+  ctx.font = "bold 10px 'Segoe UI', sans-serif";
   ctx.textAlign = "center";
-  ctx.fillText("ACTIVE CONTRACT", w / 2, 30);
-  ctx.font = "800 14px " + FONT;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText(mission.title + "  ·  " + mission.desc, w / 2, 49);
+  ctx.fillStyle = "#ffd166";
+  ctx.fillText("OBJECTIVE", mission.x, mission.y - 38);
+  ctx.restore();
+}
 
-  drawMinimap(ctx, state, w - 176, 16, 160);
-  for (let i = 0; i < 5; i++) star(ctx, w - 140 + i * 22, 190, 8, i < p.wanted);
+function drawVehicleShape(ctx, x, y, angle, hue, kind, police) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  const length = kind === "sport" ? 52 : 46;
+  const width = kind === "sport" ? 25 : 27;
 
-  ctx.fillStyle = "rgba(5,9,18,0.66)";
-  roundRect(ctx, 16, h - 70, 200, 54, 10);
+  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  roundRect(ctx, -length * 0.5 + 5, -width * 0.5 + 7, length, width, 9);
   ctx.fill();
-  ctx.strokeStyle = "rgba(255,212,94,0.25)";
-  ctx.stroke();
-  ctx.font = "700 11px " + FONT;
-  ctx.fillStyle = "#ffd45e";
-  ctx.textAlign = "left";
-  ctx.fillText("PISTOL", 28, h - 49);
-  ctx.font = "800 18px " + FONT;
-  ctx.fillStyle = "#ffffff";
-  ctx.fillText(String(p.ammo), 28, h - 27);
-  ctx.font = "700 11px " + FONT;
-  ctx.fillStyle = "#28e7ff";
-  ctx.textAlign = "right";
-  ctx.fillText((p.inCar ? "CAR " : "FOOT ") + Math.round(Math.abs(p.speed) * 18) + " KM/H", 204, h - 27);
 
-  if (state.prompt) {
-    ctx.font = "700 13px " + FONT;
-    ctx.textAlign = "center";
-    const tw = ctx.measureText(state.prompt).width + 28;
-    ctx.fillStyle = "rgba(5,9,18,0.75)";
-    roundRect(ctx, w / 2 - tw / 2, h - 46, tw, 30, 8);
+  const body = ctx.createLinearGradient(-length * 0.5, 0, length * 0.5, 0);
+  if (police) {
+    body.addColorStop(0, "#e8f4ff");
+    body.addColorStop(0.5, "#9fb4d4");
+    body.addColorStop(1, "#e8f4ff");
+  } else {
+    body.addColorStop(0, "hsl(" + hue + ",70%,22%)");
+    body.addColorStop(0.55, "hsl(" + hue + ",75%,38%)");
+    body.addColorStop(1, "hsl(" + hue + ",70%,20%)");
+  }
+  glow(ctx, hue, 10, () => {
+    ctx.fillStyle = body;
+    roundRect(ctx, -length * 0.5, -width * 0.5, length, width, 9);
     ctx.fill();
-    ctx.strokeStyle = "rgba(255,212,94,0.4)";
+    ctx.strokeStyle = "hsla(" + hue + ",100%,72%,0.9)";
+    ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.fillStyle = "#ffd45e";
-    ctx.fillText(state.prompt, w / 2, h - 27);
+  });
+
+  ctx.fillStyle = "rgba(8,16,32,0.9)";
+  roundRect(ctx, -length * 0.08, -width * 0.5 + 4, length * 0.34, width - 8, 5);
+  ctx.fill();
+  ctx.fillStyle = "rgba(120,200,255,0.25)";
+  ctx.fillRect(-length * 0.08 + 2, -width * 0.5 + 6, length * 0.3, 3);
+
+  ctx.fillStyle = "#fff5bf";
+  ctx.fillRect(length * 0.5 - 4, -width * 0.5 + 3, 4, 6);
+  ctx.fillRect(length * 0.5 - 4, width * 0.5 - 9, 4, 6);
+  ctx.fillStyle = "#ff3b5c";
+  ctx.fillRect(-length * 0.5, -width * 0.5 + 3, 3, 6);
+  ctx.fillRect(-length * 0.5, width * 0.5 - 9, 3, 6);
+
+  if (police) {
+    const flash = Math.floor(stateTick * 7) % 2;
+    glow(ctx, flash ? 350 : 210, 18, () => {
+      ctx.fillStyle = flash ? "#ff2d55" : "#39a8ff";
+      ctx.fillRect(-6, -5, 12, 10);
+    });
   }
   ctx.restore();
 }
 
-export function renderScene(ctx, state, w, h, options = {}) {
-  const cam = state.camera || { x: state.player.x - w / 2, y: state.player.y - h / 2 };
-  drawBackdrop(ctx, w, h);
-  drawRoads(ctx, state.world, cam, w, h);
-  drawBuildings(ctx, state.world, cam, w, h);
-  drawProps(ctx, state.world, cam, w, h);
-  drawCash(ctx, state, cam, w, h);
-  for (const c of state.cars) if (c.kind !== "police") drawCar(ctx, c, cam, false);
-  for (const u of state.police) drawCar(ctx, u, cam, true);
-  for (const p of state.people) drawPerson(ctx, p, cam);
-  drawPlayer(ctx, state, cam);
-  drawShots(ctx, state.shots, cam);
-  if (!options.noHud) drawHud(ctx, state, w, h);
-  if (options.label) {
-    ctx.save();
-    ctx.font = "800 12px " + FONT;
-    ctx.textAlign = "left";
-    const tw = ctx.measureText(options.label).width + 20;
-    ctx.fillStyle = "rgba(3,6,14,0.78)";
-    roundRect(ctx, 16, h - 26, tw, 20, 5);
+let stateTick = 0;
+
+function drawTraffic(ctx, state) {
+  const cam = state.camera;
+  for (const car of state.world.traffic) {
+    if (!inView(car.x, car.y, cam, 60)) continue;
+    drawVehicleShape(ctx, car.x, car.y, carAngle(car), car.hue, car.kind, false);
+  }
+}
+
+function drawPolice(ctx, state) {
+  const cam = state.camera;
+  for (const officer of state.police) {
+    if (!inView(officer.x, officer.y, cam, 70)) continue;
+    drawVehicleShape(ctx, officer.x, officer.y, officer.angle, officer.hue, "sport", true);
+  }
+}
+
+function drawPedestrians(ctx, state) {
+  const cam = state.camera;
+  for (const person of state.world.pedestrians) {
+    if (!inView(person.x, person.y, cam, 20)) continue;
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.beginPath();
+    ctx.ellipse(person.x + 2, person.y + 3, 5, 3, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = "#ff3d9a";
-    ctx.fillText(options.label, 26, h - 12);
+    glow(ctx, person.hue, 7, () => {
+      ctx.fillStyle = "hsl(" + person.hue + ",80%,58%)";
+      ctx.beginPath();
+      ctx.arc(person.x, person.y, person.height * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.strokeStyle = "rgba(255,255,255,0.45)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(person.x, person.y);
+    ctx.lineTo(person.x + Math.cos(person.angle) * 7, person.y + Math.sin(person.angle) * 7);
+    ctx.stroke();
+  }
+}
+
+function drawPlayer(ctx, state) {
+  const player = state.player;
+  if (player.vehicle) {
+    drawVehicleShape(ctx, player.vehicle.x, player.vehicle.y, player.vehicle.angle, 186, player.vehicle.kind, false);
+    ctx.fillStyle = "rgba(57,246,255,0.5)";
+    ctx.font = "bold 10px 'Segoe UI', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("YOU", player.vehicle.x, player.vehicle.y - 30);
+    return;
+  }
+  if (player.dashFx > 0) {
+    ctx.strokeStyle = "rgba(57,246,255," + (player.dashFx / 0.22) + ")";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, 16 + (0.22 - player.dashFx) * 40, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  ctx.beginPath();
+  ctx.ellipse(player.x + 3, player.y + 5, 10, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  glow(ctx, 186, 14, () => {
+    ctx.fillStyle = "#39f6ff";
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, 10, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  ctx.strokeStyle = "#ff3ea5";
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(player.x + Math.cos(player.aim) * 8, player.y + Math.sin(player.aim) * 8);
+  ctx.lineTo(player.x + Math.cos(player.aim) * 24, player.y + Math.sin(player.aim) * 24);
+  ctx.stroke();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, 3, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawProjectiles(ctx, state) {
+  for (const shot of state.projectiles) {
+    ctx.save();
+    glow(ctx, shot.hue, 12, () => {
+      ctx.strokeStyle = "hsl(" + shot.hue + ",100%,72%)";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(shot.px, shot.py);
+      ctx.lineTo(shot.x, shot.y);
+      ctx.stroke();
+    });
     ctx.restore();
   }
 }
 
-export function renderStart(ctx, state, w, h) {
-  renderScene(ctx, state, w, h, { noHud: true });
-  ctx.fillStyle = "rgba(3,6,14,0.72)";
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = "rgba(40,231,255,0.35)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(w / 2 - 300, h / 2 - 190, 600, 380);
-  neonText(ctx, "NEON", w / 2, h / 2 - 118, 72, "#ff3d9a", "center", "900");
-  neonText(ctx, "HUSTLE", w / 2, h / 2 - 46, 72, "#28e7ff", "center", "900");
-  ctx.font = "700 14px " + FONT;
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#c9d8f5";
-  ctx.fillText("STEAL. DRIVE. SHOOT. SURVIVE.", w / 2, h / 2 + 4);
-  ctx.fillStyle = "rgba(10,16,30,0.85)";
-  roundRect(ctx, w / 2 - 230, h / 2 + 32, 460, 120, 10);
-  ctx.fill();
-  ctx.strokeStyle = "rgba(255,61,154,0.35)";
-  ctx.stroke();
-  ctx.font = "700 12px " + FONT;
-  ctx.fillStyle = "#45ffb0";
-  ctx.fillText("WASD / ARROWS  DRIVE     MOUSE  AIM     CLICK / SPACE  FIRE", w / 2, h / 2 + 56);
-  ctx.fillStyle = "#ffd45e";
-  ctx.fillText("E  STEAL OR EXIT CAR     SHIFT  BOOST     ENTER  START", w / 2, h / 2 + 82);
-  ctx.fillStyle = "#8fa6cc";
-  ctx.fillText("Complete contracts, dodge the cops, bank the cash.", w / 2, h / 2 + 108);
-  neonText(ctx, "PRESS ENTER TO START", w / 2, h / 2 + 164, 20, "#ffd45e", "center", "800");
+function drawParticles(ctx, state) {
+  for (const particle of state.particles) {
+    const alpha = Math.max(0, particle.life / particle.max);
+    ctx.fillStyle = "hsla(" + particle.hue + ",100%,70%, " + alpha + ")";
+    ctx.fillRect(particle.x - particle.size * 0.5, particle.y - particle.size * 0.5, particle.size, particle.size);
+  }
 }
 
-export function renderEnd(ctx, state, w, h) {
-  renderScene(ctx, state, w, h, { noHud: true });
-  ctx.fillStyle = "rgba(3,6,14,0.78)";
-  ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = "rgba(8,13,26,0.94)";
-  roundRect(ctx, w / 2 - 270, h / 2 - 180, 540, 360, 14);
+function drawVignette(ctx) {
+  const gradient = ctx.createRadialGradient(VIEW_W * 0.5, VIEW_H * 0.5, VIEW_H * 0.28, VIEW_W * 0.5, VIEW_H * 0.5, VIEW_H * 0.86);
+  gradient.addColorStop(0, "rgba(0,0,0,0)");
+  gradient.addColorStop(1, "rgba(0,0,0,0.62)");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, VIEW_W, VIEW_H);
+  ctx.fillStyle = "rgba(120,200,255,0.025)";
+  for (let y = 0; y < VIEW_H; y += 4) ctx.fillRect(0, y, VIEW_W, 1);
+}
+
+function drawShotTag(ctx, state) {
+  if (!state.shot) return;
+  ctx.save();
+  ctx.font = "bold 11px 'Segoe UI', sans-serif";
+  ctx.fillStyle = "rgba(57,246,255,0.8)";
+  ctx.textAlign = "left";
+  ctx.fillText("NEON HUSTLE // SHOT: " + state.shot.toUpperCase() + " // SEED " + state.world.seed, 18, VIEW_H - 18);
+  ctx.fillStyle = "rgba(255,62,165,0.85)";
+  ctx.beginPath();
+  ctx.arc(VIEW_W - 24, VIEW_H - 22, 5, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "rgba(69,255,176,0.45)";
-  ctx.lineWidth = 2;
-  ctx.stroke();
-  const cleared = state.endReason !== "busted" && state.player.alive;
-  neonText(ctx, cleared ? "CONTRACT COMPLETE" : "BUSTED", w / 2, h / 2 - 126, 40,
-    cleared ? "#45ffb0" : "#ff3d6e", "center", "900");
-  ctx.font = "700 13px " + FONT;
-  ctx.textAlign = "center";
-  ctx.fillStyle = "#9fb4d8";
-  ctx.fillText("SHIFT REPORT  ·  NIGHT 01", w / 2, h / 2 - 94);
-  const rows = [
-    ["CASH BANKED", "$" + money(state.player.cash)],
-    ["DROPS COLLECTED", String(state.player.collected)],
-    ["CARS DELIVERED", String(state.player.delivered)],
-    ["WANTED PEAK", state.peakWanted + " STARS"],
-    ["DISTANCE", Math.round(state.player.distance / 10) + " BLOCKS"]
-  ];
-  for (let i = 0; i < rows.length; i++) {
-    const y = h / 2 - 56 + i * 34;
-    ctx.textAlign = "left";
-    ctx.fillStyle = "#8fa6cc";
-    ctx.font = "700 12px " + FONT;
-    ctx.fillText(rows[i][0], w / 2 - 200, y);
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "800 15px " + FONT;
-    ctx.fillText(rows[i][1], w / 2 + 200, y);
-    ctx.strokeStyle = "rgba(120,160,220,0.12)";
-    ctx.lineWidth = 1;
+  ctx.fillStyle = "rgba(255,255,255,0.65)";
+  ctx.textAlign = "right";
+  ctx.fillText("LIVE CAPTURE", VIEW_W - 36, VIEW_H - 18);
+  ctx.restore();
+}
+
+export function renderScene(ctx, state) {
+  stateTick = state.tick || 0;
+  const cam = state.camera;
+  ctx.save();
+  ctx.clearRect(0, 0, VIEW_W, VIEW_H);
+  drawGround(ctx, cam);
+  ctx.translate(-cam.x, -cam.y);
+  drawRoads(ctx, cam);
+  drawCityBlocks(ctx, state.world, cam, stateTick);
+  drawPickups(ctx, state.world, cam, stateTick);
+  drawMissionMarker(ctx, state);
+  drawPedestrians(ctx, state);
+  drawTraffic(ctx, state);
+  drawPolice(ctx, state);
+  drawPlayer(ctx, state);
+  drawProjectiles(ctx, state);
+  drawParticles(ctx, state);
+  ctx.restore();
+  drawVignette(ctx);
+  drawShotTag(ctx, state);
+}
+
+export function renderMinimap(ctx, state) {
+  const size = 180;
+  const scale = size / Math.max(state.world.width, state.world.height);
+  ctx.clearRect(0, 0, size, size);
+  ctx.fillStyle = "#04060e";
+  ctx.fillRect(0, 0, size, size);
+
+  ctx.strokeStyle = "rgba(57,246,255,0.22)";
+  ctx.lineWidth = 1;
+  for (let x = 0; x <= state.world.width; x += CITY.block) {
     ctx.beginPath();
-    ctx.moveTo(w / 2 - 200, y + 12);
-    ctx.lineTo(w / 2 + 200, y + 12);
+    ctx.moveTo(x * scale, 0);
+    ctx.lineTo(x * scale, size);
     ctx.stroke();
   }
-  neonText(ctx, "PRESS ENTER TO PLAY AGAIN", w / 2, h / 2 + 142, 16, "#28e7ff", "center", "800");
-}
+  for (let y = 0; y <= state.world.height; y += CITY.block) {
+    ctx.beginPath();
+    ctx.moveTo(0, y * scale);
+    ctx.lineTo(size, y * scale);
+    ctx.stroke();
+  }
 
-export function drawShotTag(ctx, text, w, h) {
+  ctx.fillStyle = "rgba(120,150,200,0.2)";
+  for (const building of state.world.buildings) {
+    ctx.fillRect(building.x * scale, building.y * scale, Math.max(1, building.w * scale), Math.max(1, building.h * scale));
+  }
+
+  ctx.fillStyle = "#ffd166";
+  for (const drop of state.world.pickups) {
+    if (drop.taken) continue;
+    ctx.fillRect(drop.x * scale - 1.5, drop.y * scale - 1.5, 3, 3);
+  }
+
+  const mission = state.world.missions[state.missionIndex];
+  if (mission) {
+    ctx.strokeStyle = "#ffd166";
+    ctx.beginPath();
+    ctx.arc(mission.x * scale, mission.y * scale, 4, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  ctx.fillStyle = "#ff3b5c";
+  for (const officer of state.police) {
+    ctx.beginPath();
+    ctx.arc(officer.x * scale, officer.y * scale, 2.6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  const me = playerPosition(state.player);
   ctx.save();
-  ctx.font = "800 11px " + FONT;
-  const tw = ctx.measureText(text).width + 20;
-  ctx.fillStyle = "rgba(3,6,14,0.85)";
-  roundRect(ctx, w - tw - 16, h - 32, tw, 22, 6);
+  ctx.shadowColor = "#39f6ff";
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = "#39f6ff";
+  ctx.beginPath();
+  ctx.arc(me.x * scale, me.y * scale, 4, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = "rgba(255,61,154,0.5)";
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.fillStyle = "#ffd45e";
-  ctx.textAlign = "left";
-  ctx.fillText(text, w - tw - 6, h - 17);
   ctx.restore();
 }

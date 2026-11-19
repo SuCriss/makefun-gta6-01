@@ -2,12 +2,43 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Neon Hustle</title>
 <link rel="stylesheet" href="./src/styles.css">
 </head>
 <body>
-<canvas id="stage" aria-label="Neon Hustle game canvas"></canvas>
+<div id="app">
+  <canvas id="scene" width="1280" height="720" aria-label="Neon Hustle game view"></canvas>
+  <div id="screen" class="screen"></div>
+
+  <div id="hud" class="hud hidden">
+    <div class="hud-left">
+      <div class="hud-card">
+        <span class="hud-label">HEALTH</span>
+        <div class="bar"><i id="healthBar"></i></div>
+        <span id="healthText" class="bar-value">100</span>
+      </div>
+      <div class="hud-card">
+        <span class="hud-label">CASH</span>
+        <strong id="cashText" class="cash-value">$0</strong>
+      </div>
+      <div class="hud-card">
+        <span class="hud-label">WANTED</span>
+        <span id="wantedText" class="stars">&#9734;&#9734;&#9734;&#9734;&#9734;</span>
+      </div>
+      <div class="hud-card ammo-card">
+        <span class="hud-label">AMMO</span>
+        <strong id="ammoText" class="ammo-value">24 / 120</strong>
+      </div>
+    </div>
+    <div class="hud-right">
+      <div class="map-frame"><canvas id="minimap" width="180" height="180"></canvas></div>
+      <div id="missionText" class="mission-text">MISSION: FIRST SCORE</div>
+    </div>
+    <div id="toast" class="toast"></div>
+    <div id="controlsHint" class="controls-hint">WASD move &middot; MOUSE aim &middot; CLICK fire &middot; E car &middot; R reload &middot; SPACE dash</div>
+  </div>
+</div>
 <script type="module" src="./src/main.js"></script>
 </body>
 </html>

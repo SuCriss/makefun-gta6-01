@@ -1,157 +1,183 @@
-import { generateWorld, generateTraffic, generatePedestrians } from "./world.js";
-import { createPlayer, bumpWanted } from "./player.js";
-import { createPolice } from "./police.js";
-import { renderScene, renderStart, renderEnd, drawShotTag } from "./render.js";
+import { CITY, createWorld, makeRng } from "./world.js";
+import { createPlayer } from "./player.js";
 
-function baseState(seed) {
-  const world = generateWorld(seed);
-  const player = createPlayer(seed);
+const CONTROL_ROWS = [
+  ["W A S D", "Move / drive"],
+  ["MOUSE", "Aim and fire"],
+  ["E", "Enter or steal car"],
+  ["SPACE", "Dash / handbrake"],
+  ["R", "Reload weapon"],
+  ["ESC", "Pause the hustle"]
+];
+
+export function shotLabels(shot) {
+  if (shot === "end") {
+    return {
+      kicker: "RUN COMPLETE // GTA6-01",
+      title: "CITY <em>CLEARED</em>",
+      subtitle: "Three jobs, one stolen ride, and a citywide pursuit. The neon never sleeps, but this run is yours.",
+      chips: [
+        { text: "SEED 1", tone: "" },
+        { text: "5 WANTED STARS", tone: "pink" },
+        { text: "ALL MISSIONS DONE", tone: "gold" }
+      ],
+      stats: [["CASH", "$8,640"], ["TAKEDOWNS", "12"], ["DISTANCE", "6.2 KM"]],
+      button: "RUN IT BACK",
+      footnote: "DETERMINISTIC RESULTS SCENE // NEON HUSTLE"
+    };
+  }
+  if (shot === "start") {
+    return {
+      kicker: "MAKE.FUN BOUNTY // GTA6-01",
+      title: "NEON<em>HUSTLE</em>",
+      subtitle: "Own the grid. Steal the fastest ride, grab the cash, and disappear before the blue and red lights close in.",
+      chips: [
+        { text: "OPEN WORLD", tone: "" },
+        { text: "POLICE CHASE", tone: "pink" },
+        { text: "3 STORY JOBS", tone: "gold" }
+      ],
+      controls: CONTROL_ROWS,
+      button: "START HUSTLE",
+      footnote: "OFFLINE BROWSER GAME // NO NETWORK REQUIRED"
+    };
+  }
   return {
-    world, player,
-    cars: generateTraffic(world, 18),
-    people: generatePedestrians(world, 26),
-    police: createPolice(world, 5),
-    shots: [],
-    missionIndex: 0,
-    missionProgress: 0,
-    missionPeak: 0,
-    prompt: "",
-    promptUntil: 0,
-    peakWanted: 0,
-    elapsed: 0,
-    endReason: "complete",
-    best: 0,
-    camera: null,
-    seed
+    kicker: "LIVE GAMEPLAY // GTA6-01",
+    title: "WANTED <em>04</em>",
+    subtitle: "Composed play frame: stolen sports car, active shootout, cash on the street, and a citywide response.",
+    chips: [
+      { text: "SHOT: PLAY", tone: "" },
+      { text: "WANTED 04", tone: "pink" },
+      { text: "CASH $4,200", tone: "gold" }
+    ],
+    controls: CONTROL_ROWS,
+    button: "START HUSTLE",
+    footnote: "DETERMINISTIC PLAY SCENE // STABLE SEED"
   };
 }
 
-function setStage(state) {
-  state.player.x = 720;
-  state.player.y = 700;
-  state.player.angle = -0.35;
-  const offsets = [
-    [-168, -84, 0.12, "#ff4d6d"],
-    [132, -126, Math.PI, "#3fa9f5"],
-    [186, 94, Math.PI / 2, "#f7c948"],
-    [-124, 152, -Math.PI / 2, "#36d7a1"],
-    [42, 196, 0.4, "#b478ff"]
-  ];
-  for (let i = 0; i < offsets.length; i++) {
-    const car = state.cars[i];
-    if (!car) continue;
-    car.x = state.player.x + offsets[i][0];
-    car.y = state.player.y + offsets[i][1];
-    car.angle = offsets[i][2];
-    car.color = offsets[i][3];
-  }
-  const units = [
-    [148, -182, -2.2],
-    [-196, 58, 0.4],
-    [92, 206, -1.4],
-    [228, 36, Math.PI]
-  ];
-  for (let i = 0; i < units.length; i++) {
-    const unit = state.police[i];
-    if (!unit) continue;
-    unit.x = state.player.x + units[i][0];
-    unit.y = state.player.y + units[i][1];
-    unit.angle = units[i][2];
-    unit.speed = 3.2;
-    unit.siren = i % 2 === 0;
-  }
-  for (let i = 0; i < Math.min(8, state.people.length); i++) {
-    const ped = state.people[i];
-    ped.x = state.player.x + ((i % 4) - 2) * 58 + 26;
-    ped.y = state.player.y - 76 + Math.floor(i / 4) * 152;
-    ped.angle = (i * 0.7) % (Math.PI * 2);
-  }
-  const drops = state.world.cash;
-  for (let i = 0; i < drops.length; i++) drops[i].taken = i > 13;
-  for (let i = 0; i < 4; i++) {
-    const drop = drops[i];
-    drop.x = state.player.x + ((i % 2) * 128 - 64);
-    drop.y = state.player.y - 42 - Math.floor(i / 2) * 116;
-    drop.taken = false;
-  }
+function cameraFor(x, y) {
+  return {
+    x: Math.max(0, Math.min(CITY.width - 1280, x - 640)),
+    y: Math.max(0, Math.min(CITY.height - 720, y - 360))
+  };
 }
 
-function composeStart(seed) {
-  const state = baseState(seed);
-  setStage(state);
-  state.player.inCar = true;
-  state.player.carId = state.cars[0].id;
-  state.player.speed = 0;
-  state.player.wanted = 0;
-  return state;
+function baseState(shot, seed, mode) {
+  const world = createWorld(seed);
+  const player = createPlayer(world);
+  return {
+    shot,
+    mode,
+    world,
+    player,
+    police: [],
+    projectiles: [],
+    particles: [],
+    camera: cameraFor(player.x, player.y),
+    tick: 3.2,
+    missionIndex: 0,
+    rng: makeRng(seed + 313),
+    keys: {},
+    mouse: { x: 640, y: 360, down: false },
+    stats: { collected: 0, takedowns: 0, distance: 0, elapsed: 0, jobs: 0 }
+  };
 }
 
-function composePlay(seed) {
-  const state = baseState(seed);
-  setStage(state);
-  state.player.inCar = true;
-  state.player.carId = state.cars[0].id;
-  state.cars[0].occupied = true;
-  state.cars[0].stolen = true;
-  state.player.speed = 4.2;
-  state.player.cash = 1240;
-  state.player.ammo = 21;
-  state.player.health = 76;
-  state.player.armor = 34;
-  state.player.collected = 4;
-  bumpWanted(state.player, 3);
-  state.peakWanted = 3;
-  state.missionPeak = 3;
-  state.prompt = "HOTWIRE COMPLETE  +$250";
-  state.shots.push({
-    x: state.player.x + 126, y: state.player.y - 34,
-    vx: 520, vy: -60, life: 0.8, friendly: true, damage: 24
+function mountStolenCar(state, carIndex, x, y, angle, kind) {
+  const car = state.world.traffic[carIndex];
+  car.x = x;
+  car.y = y;
+  car.vertical = false;
+  car.dir = 1;
+  car.angle = angle;
+  car.kind = kind;
+  car.stolen = true;
+  state.player.vehicle = car;
+  state.player.x = x;
+  state.player.y = y;
+  state.player.angle = angle;
+  state.player.aim = angle;
+  state.camera = cameraFor(x, y);
+}
+
+function addOfficer(state, x, y, angle, hue) {
+  state.police.push({
+    x,
+    y,
+    angle,
+    speed: 176,
+    turn: 2.4,
+    fireClock: 0.5,
+    hp: 80,
+    hue
   });
-  state.shots.push({
-    x: state.player.x - 142, y: state.player.y + 72,
-    vx: -420, vy: 40, life: 0.8, friendly: false, damage: 12
-  });
-  return state;
 }
 
-function composeEnd(seed) {
-  const state = baseState(seed);
-  setStage(state);
-  state.player.inCar = false;
-  state.player.x = 748;
-  state.player.y = 736;
-  state.player.angle = 0.6;
-  state.player.cash = 2450;
-  state.player.ammo = 12;
-  state.player.health = 62;
-  state.player.armor = 8;
-  state.player.collected = 11;
-  state.player.delivered = 4;
-  state.player.distance = 12840;
-  state.player.wanted = 1;
-  state.peakWanted = 4;
+function addParticle(state, x, y, hue, size, vx, vy, life) {
+  state.particles.push({ x, y, vx, vy, life, max: life, hue, size });
+}
+
+export function buildShotScene(shot, seed) {
+  const requested = shot === "start" || shot === "play" || shot === "end" ? shot : "start";
+  const mode = requested === "start" ? "start" : requested === "end" ? "results" : "play";
+  const state = baseState(requested, seed, mode);
+
+  if (requested === "start") {
+    state.player.x = 1216;
+    state.player.y = 1536;
+    state.player.aim = -0.35;
+    state.camera = cameraFor(1216, 1536);
+    state.player.cash = 260;
+    for (let i = 0; i < 5; i += 1) {
+      const drop = state.world.pickups[i];
+      drop.taken = false;
+    }
+    addParticle(state, 1240, 1518, 186, 4, 12, -18, 0.3);
+    return state;
+  }
+
+  if (requested === "play") {
+    mountStolenCar(state, 3, 1440, 1200, -0.22, "sport");
+    state.player.hp = 74;
+    state.player.cash = 4200;
+    state.player.wanted = 4;
+    state.player.wantedClock = 12;
+    state.player.ammo = 17;
+    state.player.reserve = 84;
+    state.player.speed = 214;
+    state.missionIndex = 1;
+    state.stats = { collected: 8, takedowns: 4, distance: 1820, elapsed: 96, jobs: 1 };
+    addOfficer(state, 1180, 1040, 0.52, 350);
+    addOfficer(state, 1720, 1120, Math.PI - 0.35, 200);
+    addOfficer(state, 1600, 1480, -2.3, 350);
+    addOfficer(state, 1280, 1520, -0.8, 200);
+    state.projectiles.push(
+      { x: 1330, y: 1130, px: 1240, py: 1090, vx: 520, vy: 220, life: 0.6, team: "police", damage: 9, hue: 350 },
+      { x: 1550, y: 1160, px: 1620, py: 1210, vx: -560, vy: -260, life: 0.6, team: "player", damage: 26, hue: 186 },
+      { x: 1508, y: 1336, px: 1450, py: 1280, vx: 260, vy: 420, life: 0.6, team: "police", damage: 9, hue: 200 }
+    );
+    for (let i = 0; i < 9; i += 1) {
+      const rng = makeRng(seed + 900 + i);
+      addParticle(state, 1440 + rng() * 80 - 40, 1200 + rng() * 60 - 30, i % 2 ? 42 : 186, 3 + rng() * 4, (rng() - 0.5) * 140, (rng() - 0.5) * 140, 0.25 + rng() * 0.2);
+    }
+    return state;
+  }
+
+  mountStolenCar(state, 7, 2880, 2160, 0.4, "sport");
+  state.player.hp = 100;
+  state.player.cash = 8640;
+  state.player.wanted = 5;
+  state.player.ammo = 9;
+  state.player.reserve = 36;
   state.missionIndex = 3;
-  state.endReason = "complete";
-  state.best = 2450;
-  return state;
-}
-
-export function renderShot(ctx, mode, seed, w, h) {
-  const chosen = Number.isFinite(seed) ? seed : 1;
-  if (mode === "start") {
-    const state = composeStart(chosen);
-    renderStart(ctx, state, w, h);
-    drawShotTag(ctx, "SHOT START  ·  SEED " + chosen, w, h);
-    return state;
-  }
-  if (mode === "end") {
-    const state = composeEnd(chosen);
-    renderEnd(ctx, state, w, h);
-    drawShotTag(ctx, "SHOT END  ·  SEED " + chosen, w, h);
-    return state;
-  }
-  const state = composePlay(chosen);
-  renderScene(ctx, state, w, h, { label: "SHOT PLAY  ·  SEED " + chosen });
-  drawShotTag(ctx, "NEON HUSTLE  ·  PLAY", w, h);
+  state.stats = { collected: 21, takedowns: 12, distance: 6240, elapsed: 312, jobs: 3 };
+  addOfficer(state, 2640, 2040, 0.6, 350);
+  addOfficer(state, 3120, 2280, -2.4, 200);
+  addOfficer(state, 2760, 2420, -0.9, 350);
+  state.projectiles.push(
+    { x: 2710, y: 2100, px: 2620, py: 2050, vx: 480, vy: 260, life: 0.5, team: "police", damage: 9, hue: 200 }
+  );
+  for (const drop of state.world.pickups) drop.taken = true;
   return state;
 }

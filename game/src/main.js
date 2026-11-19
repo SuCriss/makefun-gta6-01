@@ -1,298 +1,337 @@
-import { generateWorld, generateTraffic, generatePedestrians, makeRng } from "./world.js";
-import {
-  createPlayer, accelerate, nearestStealable, enterCar, exitCar,
-  fire, hurt, earn, bumpWanted
-} from "./player.js";
-import { createPolice, updatePolice } from "./police.js";
-import { renderScene, renderStart, renderEnd } from "./render.js";
-import { renderShot } from "./shots.js";
+import { CITY, createWorld, makeRng, updateTraffic, updatePedestrians, clamp } from "./world.js";
+import { createPlayer, updatePlayer, toggleVehicle, addWanted, playerPosition } from "./player.js";
+import { createPolice, updatePolice, updateProjectiles, updateParticles } from "./police.js";
+import { renderScene, renderMinimap } from "./render.js";
+import { buildShotScene, shotLabels } from "./shots.js";
 
-const canvas = document.getElementById("stage");
+const canvas = document.getElementById("scene");
 const ctx = canvas.getContext("2d");
-let viewW = 960;
-let viewH = 540;
+const minimap = document.getElementById("minimap");
+const minimapCtx = minimap.getContext("2d");
+const screen = document.getElementById("screen");
+const hud = document.getElementById("hud");
+const healthBar = document.getElementById("healthBar");
+const healthText = document.getElementById("healthText");
+const cashText = document.getElementById("cashText");
+const wantedText = document.getElementById("wantedText");
+const ammoText = document.getElementById("ammoText");
+const missionText = document.getElementById("missionText");
+const toast = document.getElementById("toast");
 
-function sizeCanvas() {
-  const ratio = Math.min(2, window.devicePixelRatio || 1);
-  viewW = Math.max(320, canvas.clientWidth || window.innerWidth || 960);
-  viewH = Math.max(240, canvas.clientHeight || window.innerHeight || 540);
-  canvas.width = Math.round(viewW * ratio);
-  canvas.height = Math.round(viewH * ratio);
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-}
-
+const SAVE_KEY = "neon-hustle-save-v1";
 const params = new URLSearchParams(location.search);
 const shotMode = params.get("shot");
-const seedArg = Number.parseInt(params.get("seed") || "1", 10);
-const seed = Number.isFinite(seedArg) ? seedArg : 1;
+const parsedSeed = Number.parseInt(params.get("seed") || "20261119", 10);
+const seed = Number.isFinite(parsedSeed) ? parsedSeed : 20261119;
 
-sizeCanvas();
-if (shotMode) {
-  renderShot(ctx, shotMode, seed, viewW, viewH);
-} else {
-  bootGame(seed);
+function readSave() {
+  try {
+    return JSON.parse(localStorage.getItem(SAVE_KEY)) || {};
+  } catch (error) {
+    return {};
+  }
 }
 
-function bootGame(gameSeed) {
-  const world = generateWorld(gameSeed);
-  const rng = makeRng(gameSeed + 4242);
-  const keys = Object.create(null);
-  const mouse = { x: viewW / 2, y: viewH / 2, down: false };
-  const SAVE_KEY = "neon-hustle-save-v1";
-  let screen = "start";
-  let state = freshState();
-
-  function freshState() {
-    return {
-      world,
-      player: createPlayer(gameSeed),
-      cars: generateTraffic(world, 20),
-      people: generatePedestrians(world, 30),
-      police: createPolice(world, 6),
-      shots: [],
-      missionIndex: 0,
-      missionProgress: 0,
-      missionPeak: 0,
-      prompt: "",
-      promptUntil: 0,
-      peakWanted: 0,
-      elapsed: 0,
-      endReason: "complete",
-      best: 0,
-      camera: null,
-      seed: gameSeed
-    };
+function writeSave(record) {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify(record));
+  } catch (error) {
+    return;
   }
+}
 
-  function loadSave() {
-    try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (err) {
-      return null;
-    }
-  }
+function showToast(message) {
+  state.toastMessage = message;
+  state.toastClock = 2.2;
+  toast.textContent = message;
+  toast.classList.add("show");
+}
 
-  function saveGame() {
-    try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify({
-        best: state.best,
-        cash: state.player.cash,
-        seed: gameSeed
-      }));
-    } catch (err) {
-      return;
-    }
-  }
+function freshState() {
+  const world = createWorld(seed);
+  const player = createPlayer(world);
+  return {
+    shot: null,
+    mode: "start",
+    world,
+    player,
+    police: createPolice(),
+    projectiles: [],
+    particles: [],
+    camera: {
+      x: clamp(player.x - 640, 0, CITY.width - 1280),
+      y: clamp(player.y - 360, 0, CITY.height - 720)
+    },
+    tick: 0,
+    missionIndex: 0,
+    hotRideDone: false,
+    survivalClock: 0,
+    toastClock: 0,
+    toastMessage: "",
+    rng: makeRng(seed + 313),
+    keys: {},
+    mouse: { x: 640, y: 360, down: false },
+    stats: { collected: 0, takedowns: 0, distance: 0, elapsed: 0, jobs: 0 },
+    notify: showToast
+  };
+}
 
-  function showPrompt(text) {
-    state.prompt = text;
-    state.promptUntil = state.elapsed + 2.4;
-  }
+let state = shotMode ? buildShotScene(shotMode, seed) : freshState();
+state.notify = showToast;
 
-  function finish(reason) {
-    if (screen === "end") return;
-    state.endReason = reason;
-    const previous = loadSave();
-    state.best = Math.max(state.best, state.player.cash, (previous && previous.best) || 0);
-    saveGame();
-    screen = "end";
-  }
+function panelMarkup(info) {
+  const chips = (info.chips || []).map((chip) => '<span class="chip ' + chip.tone + '">' + chip.text + "</span>").join("");
+  const controls = info.controls
+    ? '<div class="controls">' + info.controls.map((row) => "<div><b>" + row[0] + "</b> &nbsp;" + row[1] + "</div>").join("") + "</div>"
+    : "";
+  const stats = info.stats
+    ? '<div class="stats">' + info.stats.map((item) => '<div class="stat"><span>' + item[0] + "</span><strong>" + item[1] + "</strong></div>").join("") + "</div>"
+    : "";
+  return (
+    '<div class="panel">' +
+    '<p class="kicker">' + info.kicker + "</p>" +
+    '<h1 class="title">' + info.title + "</h1>" +
+    '<p class="subtitle">' + info.subtitle + "</p>" +
+    '<div class="chips">' + chips + "</div>" +
+    stats + controls +
+    '<button id="primaryAction" class="action" type="button">' + info.button + "</button>" +
+    '<p class="footnote">' + info.footnote + "</p>" +
+    "</div>"
+  );
+}
 
-  function completeMission() {
-    const mission = world.missions[state.missionIndex % world.missions.length];
-    state.player.cash += mission.reward;
-    state.missionIndex += 1;
-    state.missionProgress = 0;
-    state.missionPeak = 0;
-    showPrompt("CONTRACT CLEARED  +$" + mission.reward);
-    if (state.missionIndex >= world.missions.length) finish("complete");
-  }
-
-  window.addEventListener("keydown", (event) => {
-    const key = event.key.toLowerCase();
-    keys[key] = true;
-    if (key === " " || key.indexOf("arrow") === 0) event.preventDefault();
-    if (key === "enter") {
-      if (screen === "start") {
-        const saved = loadSave();
-        state.best = (saved && saved.best) || 0;
-        screen = "play";
-        showPrompt("GET MOVING, ROOK");
-      } else if (screen === "end") {
-        state = freshState();
-        screen = "play";
-        showPrompt("NEW SHIFT STARTED");
+function showScreen(info, action) {
+  screen.innerHTML = panelMarkup(info);
+  screen.dataset.action = action;
+  const button = document.getElementById("primaryAction");
+  if (button) {
+    button.addEventListener("click", () => {
+      const choice = screen.dataset.action;
+      if (choice === "launch") {
+        location.search = "";
+        return;
       }
-    }
-    if (key === "e" && screen === "play") {
-      if (state.player.inCar) {
-        const left = exitCar(state.player, state.cars);
-        if (left && left.stolen) {
-          state.player.delivered += 1;
-          if (state.missionIndex === 2) {
-            state.missionProgress += 1;
-            if (state.missionProgress >= 5) completeMission();
-          }
-        }
-      } else {
-        const target = nearestStealable(state.player, state.cars);
-        if (target && enterCar(state.player, target)) {
-          bumpWanted(state.player, 1);
-          showPrompt("HOTWIRE COMPLETE  +$250");
-          state.player.cash += 250;
-        } else {
-          showPrompt("NO VEHICLE IN RANGE");
-        }
+      if (choice === "resume") {
+        resumeRun();
+        return;
       }
-    }
-  });
-
-  window.addEventListener("keyup", (event) => {
-    keys[event.key.toLowerCase()] = false;
-  });
-
-  canvas.addEventListener("mousemove", (event) => {
-    const bounds = canvas.getBoundingClientRect();
-    mouse.x = event.clientX - bounds.left;
-    mouse.y = event.clientY - bounds.top;
-  });
-  canvas.addEventListener("mousedown", () => { mouse.down = true; });
-  window.addEventListener("mouseup", () => { mouse.down = false; });
-  window.addEventListener("resize", sizeCanvas);
-
-  function step(dt) {
-    const player = state.player;
-    state.elapsed += dt;
-    if (state.prompt && state.elapsed > state.promptUntil) state.prompt = "";
-
-    accelerate(player, {
-      up: !!(keys["w"] || keys["arrowup"]),
-      down: !!(keys["s"] || keys["arrowdown"]),
-      left: !!(keys["a"] || keys["arrowleft"]),
-      right: !!(keys["d"] || keys["arrowright"]),
-      boost: !!keys["shift"]
-    }, dt);
-
-    for (const car of state.cars) {
-      if (car.kind === "police" || car.occupied) continue;
-      const stride = car.speed * 42 * dt;
-      car.x += Math.cos(car.angle) * stride;
-      car.y += Math.sin(car.angle) * stride;
-      if (car.x < 20 || car.x > world.width - 20) car.angle = Math.PI - car.angle;
-      if (car.y < 20 || car.y > world.height - 20) car.angle = -car.angle;
-      car.x = Math.max(20, Math.min(world.width - 20, car.x));
-      car.y = Math.max(20, Math.min(world.height - 20, car.y));
-    }
-
-    for (const ped of state.people) {
-      ped.x += Math.cos(ped.angle) * 12 * dt;
-      ped.y += Math.sin(ped.angle) * 12 * dt;
-      ped.x = Math.max(20, Math.min(world.width - 20, ped.x));
-      ped.y = Math.max(20, Math.min(world.height - 20, ped.y));
-    }
-
-    if ((mouse.down || keys[" "]) && player.ammo > 0) {
-      const aim = {
-        x: mouse.x + player.x - viewW / 2,
-        y: mouse.y + player.y - viewH / 2
-      };
-      const bullet = fire(player, aim, rng);
-      if (bullet) state.shots.push(bullet);
-    }
-
-    for (const shot of state.shots) {
-      shot.x += shot.vx * dt;
-      shot.y += shot.vy * dt;
-      shot.life -= dt;
-      if (!shot.friendly) {
-        const dx = player.x - shot.x;
-        const dy = player.y - shot.y;
-        if (dx * dx + dy * dy < 22 * 22) {
-          hurt(player, shot.damage);
-          shot.life = 0;
-        }
-      } else {
-        for (const unit of state.police) {
-          const dx = unit.x - shot.x;
-          const dy = unit.y - shot.y;
-          if (dx * dx + dy * dy < 20 * 20) {
-            unit.health -= shot.damage;
-            shot.life = 0;
-            if (unit.health <= 0) {
-              player.kills += 1;
-              player.cash += 100;
-              bumpWanted(player, 1);
-              unit.health = 90;
-              showPrompt("UNIT DOWN  +$100");
-            }
-            break;
-          }
-        }
-      }
-    }
-    state.shots = state.shots.filter(shot =>
-      shot.life > 0 && shot.x > 0 && shot.y > 0 &&
-      shot.x < world.width && shot.y < world.height
-    );
-
-    const policeBullet = updatePolice(state.police, player, dt, rng);
-    if (policeBullet) state.shots.push(policeBullet);
-
-    for (const unit of state.police) {
-      const dx = player.x - unit.x;
-      const dy = player.y - unit.y;
-      if (dx * dx + dy * dy < 30 * 30) hurt(player, 8 * dt);
-    }
-
-    let pursued = false;
-    for (const unit of state.police) {
-      if (Math.hypot(player.x - unit.x, player.y - unit.y) < 420) {
-        pursued = true;
-        break;
-      }
-    }
-    if (!pursued && player.wanted > 0) {
-      player.wanted = Math.max(0, player.wanted - dt * 0.12);
-    }
-    state.peakWanted = Math.max(state.peakWanted, Math.floor(player.wanted));
-    state.missionPeak = Math.max(state.missionPeak, Math.floor(player.wanted));
-    if (state.missionIndex === 1 && state.missionPeak >= 3 && player.wanted === 0) {
-      completeMission();
-    }
-
-    for (const drop of world.cash) {
-      if (drop.taken) continue;
-      const dx = player.x - drop.x;
-      const dy = player.y - drop.y;
-      if (dx * dx + dy * dy < 26 * 26) {
-        drop.taken = true;
-        earn(player, drop.amount);
-        showPrompt("CASH GRABBED  +$" + drop.amount);
-        if (state.missionIndex === 0) {
-          state.missionProgress += 1;
-          if (state.missionProgress >= 3) completeMission();
-        }
-      }
-    }
-
-    if (!player.alive) finish("busted");
+      startRun();
+    });
   }
+}
 
-  function draw() {
-    if (screen === "start") renderStart(ctx, state, viewW, viewH);
-    else if (screen === "end") renderEnd(ctx, state, viewW, viewH);
-    else renderScene(ctx, state, viewW, viewH);
-  }
+function clearScreen() {
+  screen.innerHTML = "";
+  screen.dataset.action = "";
+}
 
-  let previousFrame = 0;
-  function frame(timestamp) {
-    if (!previousFrame) previousFrame = timestamp;
-    const dt = Math.min(0.05, (timestamp - previousFrame) / 1000);
-    previousFrame = timestamp;
-    if (screen === "play") step(dt);
-    draw();
-    requestAnimationFrame(frame);
+function startInfo() {
+  const save = readSave();
+  const info = shotLabels("start");
+  info.footnote = "OFFLINE BROWSER GAME // BEST CASH $" + (save.bestCash || 0);
+  return info;
+}
+
+function showStart() {
+  state.mode = "start";
+  hud.classList.add("hidden");
+  showScreen(startInfo(), shotMode ? "launch" : "start");
+}
+
+function resultInfo(outcome) {
+  const info = shotLabels("end");
+  info.kicker = outcome;
+  info.stats = [
+    ["CASH", "$" + state.player.cash],
+    ["TAKEDOWNS", String(state.stats.takedowns)],
+    ["JOBS", state.stats.jobs + " / 3"]
+  ];
+  info.footnote = "RUN SUMMARY // DISTANCE " + Math.round(state.stats.distance / 1000 * 10) / 10 + " KM";
+  return info;
+}
+
+function finishRun(outcome) {
+  if (state.mode === "results") return;
+  state.mode = "results";
+  state.mouse.down = false;
+  const record = readSave();
+  record.bestCash = Math.max(record.bestCash || 0, state.player.cash);
+  record.runs = (record.runs || 0) + 1;
+  writeSave(record);
+  hud.classList.add("hidden");
+  showScreen(resultInfo(outcome), shotMode ? "launch" : "restart");
+}
+
+function pauseRun() {
+  if (state.mode !== "play") return;
+  state.mode = "paused";
+  state.mouse.down = false;
+  showScreen(
+    {
+      kicker: "HUSTLE ON HOLD",
+      title: "TAKE A <em>BREATH</em>",
+      subtitle: "The city keeps glowing. Get back out there when you are ready.",
+      chips: [{ text: "PAUSED", tone: "" }, { text: "SAVE READY", tone: "gold" }],
+      stats: [["CASH", "$" + state.player.cash], ["WANTED", state.player.wanted + " / 5"], ["JOBS", state.stats.jobs + " / 3"]],
+      button: "RESUME",
+      footnote: "PRESS ESC AGAIN TO RESUME"
+    },
+    "resume"
+  );
+}
+
+function resumeRun() {
+  if (state.mode !== "paused") return;
+  state.mode = "play";
+  clearScreen();
+}
+
+function startRun() {
+  state = freshState();
+  state.mode = "play";
+  clearScreen();
+  hud.classList.remove("hidden");
+  showToast("JOB 1: GRAB THREE CASH DROPS");
+  launchLoop();
+}
+
+function updateHud() {
+  const player = state.player;
+  healthBar.style.width = Math.max(0, player.hp / player.maxHp * 100) + "%";
+  healthText.textContent = String(Math.ceil(player.hp));
+  cashText.textContent = "$" + player.cash;
+  wantedText.textContent = "★".repeat(player.wanted) + "☆".repeat(5 - player.wanted);
+  ammoText.textContent = player.ammo + " / " + player.reserve;
+  const mission = state.world.missions[state.missionIndex];
+  if (!mission) {
+    missionText.textContent = "ALL JOBS COMPLETE";
+  } else {
+    let progress = 0;
+    if (mission.id === 0) progress = Math.min(mission.goal, state.stats.collected);
+    if (mission.id === 1) progress = state.hotRideDone ? 1 : 0;
+    if (mission.id === 2) progress = Math.min(mission.goal, Math.floor(state.survivalClock));
+    missionText.textContent = "JOB " + (mission.id + 1) + "/3 · " + mission.title + " · " + progress + "/" + mission.goal;
   }
+  if (state.toastClock <= 0) toast.classList.remove("show");
+}
+
+function advanceMissions(dt) {
+  const mission = state.world.missions[state.missionIndex];
+  if (!mission) return;
+  let done = false;
+  if (mission.id === 0) done = state.stats.collected >= mission.goal;
+  if (mission.id === 1) done = state.hotRideDone;
+  if (mission.id === 2) {
+    if (state.player.wanted >= 3) state.survivalClock += dt;
+    done = state.survivalClock >= mission.goal;
+  }
+  if (!done) return;
+  state.player.cash += mission.reward;
+  state.stats.jobs += 1;
+  state.missionIndex += 1;
+  state.survivalClock = 0;
+  addWanted(state.player, 1);
+  if (state.missionIndex >= state.world.missions.length) {
+    showToast("ALL JOBS COMPLETE +$" + mission.reward);
+    finishRun("CITY CLEARED // ALL JOBS DONE");
+  } else {
+    showToast("JOB COMPLETE +$" + mission.reward);
+  }
+}
+
+function updateCamera(dt) {
+  const me = playerPosition(state.player);
+  const targetX = clamp(me.x - 640, 0, CITY.width - 1280);
+  const targetY = clamp(me.y - 360, 0, CITY.height - 720);
+  const blend = Math.min(1, dt * 5);
+  state.camera.x += (targetX - state.camera.x) * blend;
+  state.camera.y += (targetY - state.camera.y) * blend;
+}
+
+let lastFrame = 0;
+let loopActive = false;
+
+function simulate(dt) {
+  state.tick += dt;
+  state.stats.elapsed += dt;
+  state.stats.distance = Math.round(state.player.distance);
+  state.toastClock = Math.max(0, state.toastClock - dt);
+  updateTraffic(state.world.traffic, dt);
+  updatePedestrians(state.world.pedestrians, dt, state.rng);
+  updatePlayer(state.player, state, dt);
+  updatePolice(state.police, state.player, state, dt);
+  updateProjectiles(state, dt);
+  updateParticles(state.particles, dt);
+  updateCamera(dt);
+  advanceMissions(dt);
+  updateHud();
+  if (state.player.hp <= 0) finishRun("RUN OVER // WASTED");
+}
+
+function frame(now) {
+  const dt = lastFrame ? Math.min(0.04, (now - lastFrame) / 1000) : 0.016;
+  lastFrame = now;
+  if (state.mode === "play") simulate(dt);
+  renderScene(ctx, state);
+  renderMinimap(minimapCtx, state);
   requestAnimationFrame(frame);
+}
+
+function launchLoop() {
+  if (loopActive) return;
+  loopActive = true;
+  lastFrame = 0;
+  requestAnimationFrame(frame);
+}
+
+window.addEventListener("keydown", (event) => {
+  if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) event.preventDefault();
+  if (event.code === "Escape") {
+    if (state.mode === "play") pauseRun();
+    else if (state.mode === "paused") resumeRun();
+    return;
+  }
+  if (state.mode !== "play") return;
+  state.keys[event.code] = true;
+  if (event.code === "KeyE") {
+    toggleVehicle(state.player, state.world, showToast);
+    if (state.player.vehicle && state.player.vehicle.kind === "sport" && state.player.vehicle.stolen) state.hotRideDone = true;
+  }
+});
+
+window.addEventListener("keyup", (event) => {
+  state.keys[event.code] = false;
+});
+
+canvas.addEventListener("mousemove", (event) => {
+  const bounds = canvas.getBoundingClientRect();
+  state.mouse.x = (event.clientX - bounds.left) * canvas.width / bounds.width;
+  state.mouse.y = (event.clientY - bounds.top) * canvas.height / bounds.height;
+});
+
+canvas.addEventListener("mousedown", (event) => {
+  if (event.button === 0) state.mouse.down = true;
+});
+
+window.addEventListener("mouseup", () => {
+  state.mouse.down = false;
+});
+
+canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+
+if (shotMode) {
+  const info = shotLabels(state.shot);
+  if (state.mode === "results") {
+    hud.classList.add("hidden");
+  } else {
+    hud.classList.remove("hidden");
+  }
+  showScreen(info, "launch");
+  updateHud();
+  renderScene(ctx, state);
+  renderMinimap(minimapCtx, state);
+} else {
+  showStart();
+  renderScene(ctx, state);
+  renderMinimap(minimapCtx, state);
 }
